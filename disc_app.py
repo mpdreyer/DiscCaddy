@@ -134,7 +134,7 @@ def analyze_image(image_bytes):
     try:
         b64 = base64.b64encode(image_bytes).decode('utf-8')
         client = OpenAI(api_key=st.secrets["openai_key"])
-        prompt = "Identifiera discen. Svara JSON: {\"Modell\": \"Namn\", \"Typ\": \"Fairway Driver\", \"Speed\": 7.0, \"Glide\": 5.0, \"Turn\": 0.0, \"Fade\": 2.0}"
+        prompt = "Identifiera discen. VIKTIGT OM TYP: Exakt 'Putter', 'Midrange', 'Fairway Driver', 'Distance Driver'. Svara JSON: {\"Modell\": \"Namn\", \"Typ\": \"Fairway Driver\", \"Speed\": 7.0, \"Glide\": 5.0, \"Turn\": 0.0, \"Fade\": 2.0}"
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=300)
         return res.choices[0].message.content
     except: return None
@@ -185,7 +185,7 @@ def generate_smart_bag(inventory, player, course_name):
     
     all_discs = inventory[inventory["Owner"] == player].copy()
     for col in ["Speed", "Glide", "Turn", "Fade"]: all_discs[col] = pd.to_numeric(all_discs[col], errors='coerce').fillna(0)
-    all_discs["Stability"] = all_discs["Turn"] + all_discs["Fade"] # Enkel stabilitets-metrik
+    all_discs["Stability"] = all_discs["Turn"] + all_discs["Fade"]
     
     pack_indices = []
     
@@ -195,19 +195,17 @@ def generate_smart_bag(inventory, player, course_name):
         for i in range(min(count, len(sorted_df))):
             pack_indices.append(sorted_df.iloc[i].name)
 
-    # 1. PUTTERS (Minst 2: En Driving, En Putting)
+    # 1. PUTTERS (Minst 2)
     putters = all_discs[all_discs["Typ"] == "Putter"]
-    add_best_of(putters, 2, "Speed", True) # Tar de två långsammaste (oftast putters)
+    add_best_of(putters, 2, "Speed", True) 
     
-    # 2. MIDRANGE (Minst 2: En Stabil, En Understabil/Rak)
+    # 2. MIDRANGE (Minst 2: En Stabil, En Rak)
     mids = all_discs[all_discs["Typ"] == "Midrange"]
     if not mids.empty:
-        # Hitta mest stabil
         pack_indices.append(mids.sort_values("Stability", ascending=False).iloc[0].name)
-        # Hitta mest understabil
         pack_indices.append(mids.sort_values("Stability", ascending=True).iloc[0].name)
         
-    # 3. FAIRWAY (Minst 2: En Stabil, En Understabil)
+    # 3. FAIRWAY (Minst 2)
     fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
     if not fairways.empty:
         pack_indices.append(fairways.sort_values("Stability", ascending=False).iloc[0].name)
@@ -217,9 +215,7 @@ def generate_smart_bag(inventory, player, course_name):
     if max_len > 90:
         drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
         if not drivers.empty:
-            # En max distans (snabbast + glide)
             pack_indices.append(drivers.sort_values("Glide", ascending=False).iloc[0].name)
-            # En kontroll (mer fade)
             pack_indices.append(drivers.sort_values("Fade", ascending=False).iloc[0].name)
 
     return list(set(pack_indices))
@@ -250,7 +246,7 @@ if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v44.0 Grand Prix Engineering")
+    st.caption("🟢 v45.0 Telemetry Center")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -297,7 +293,7 @@ with st.sidebar:
         st.rerun()
     if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
-t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📊 STATS", "⚙️ ADMIN", "🎯 PUTT"])
+t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 TELEMETRY", "⚙️ ADMIN", "🎯 PUTT"])
 
 # TAB 1: WARM-UP
 with t1:
@@ -464,29 +460,16 @@ with t4:
         if c2.button("Generera"): st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, owner, tc); st.rerun()
         if st.session_state.suggested_pack:
             pack_names = st.session_state.inventory.loc[st.session_state.suggested_pack, "Modell"].tolist()
-            c1.info(f"Föreslår {len(pack_names)} discar: {', '.join(pack_names)}")
+            c1.info(f"Föreslår: {', '.join(pack_names)}")
             if c3.button("Verkställ", type="primary"):
                 st.session_state.inventory.loc[st.session_state.inventory["Owner"]==owner, "Status"] = "Shelf"
                 st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
-                save_to_sheet(st.session_state.inventory, "Inventory"); st.session_state.suggested_pack = []; st.success("Packat!"); st.rerun()
+                save_to_sheet(st.session_state.inventory, "Inventory"); st.session_state.suggested_pack = []; st.success("Bagen packad!"); st.rerun()
 
     if owner:
         st.markdown("---")
-        # FLIGHT CHART (Telemetri)
-        st.subheader("✈️ Aero Dynamics (Flight Telemetry)")
-        my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner].copy()
-        
-        if not my_inv.empty:
-            chart = alt.Chart(my_inv).mark_circle(size=150).encode(
-                x=alt.X('Turn', scale=alt.Scale(domain=[-5, 2])),
-                y=alt.Y('Fade', scale=alt.Scale(domain=[0, 6])),
-                color=alt.Color('Typ', legend=alt.Legend(title="Typ")),
-                tooltip=['Modell', 'Speed', 'Glide', 'Turn', 'Fade', 'Status']
-            ).properties(height=300).interactive()
-            st.altair_chart(chart, use_container_width=True)
-
-        st.markdown("---")
         sort_mode = st.radio("Sortera på:", ["Speed", "Modell", "Typ"], horizontal=True)
+        my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
         c_shelf = st.container(border=True); c_bag = st.container(border=True)
         
         with c_shelf:
@@ -547,56 +530,82 @@ with t4:
                 save_to_sheet(st.session_state.inventory, "Inventory")
                 st.success(f"{mn} sparad!"); st.session_state.ai_disc_data = None; st.rerun()
 
-# TAB 5: SCUDERIA TELEMETRY (STATS)
+# TAB 5: TELEMETRY (NEW)
 with t5:
-    st.header("🏎️ SCUDERIA TELEMETRY CENTER")
+    st.header("📈 SCUDERIA TELEMETRY")
+    
+    # 1. TABS FÖR UNDER-DATA
+    st1, st2, st3 = st.tabs(["🏎️ Race Trace (Trend)", "✈️ Aero Lab (Discs)", "🧩 Sector Analysis (Holes)"])
     
     df = st.session_state.history
-    if not df.empty:
-        # FILTER
-        c1, c2 = st.columns(2)
-        sel_p = c1.multiselect("Förare (Spelare)", df["Spelare"].unique(), default=df["Spelare"].unique())
-        sel_c = c2.multiselect("Grand Prix (Bana)", df["Bana"].unique(), default=df["Bana"].unique())
-        
-        dff = df[(df["Spelare"].isin(sel_p)) & (df["Bana"].isin(sel_c))]
-        
-        if not dff.empty:
-            st.subheader("📊 Paddock Overview")
-            col1, col2, col3 = st.columns(3)
-            avg_score = dff["Resultat"].mean()
-            best_round = dff.groupby(["Datum", "Spelare"])["Resultat"].sum().min()
-            total_holes = len(dff)
+    
+    with st1:
+        if not df.empty:
+            sel_p = st.multiselect("Välj Förare", df["Spelare"].unique(), default=df["Spelare"].unique())
+            dff = df[df["Spelare"].isin(sel_p)]
             
-            col1.markdown(f"<div class='stat-card'><div class='stat-label'>Snitt Score (Hål)</div><div class='stat-value'>{avg_score:.2f}</div></div>", unsafe_allow_html=True)
-            col2.markdown(f"<div class='stat-card'><div class='stat-label'>Bästa Runda (Total)</div><div class='stat-value'>{int(best_round) if not np.isnan(best_round) else '-'}</div></div>", unsafe_allow_html=True)
-            col3.markdown(f"<div class='stat-card'><div class='stat-label'>Antal Hål Spelade</div><div class='stat-value'>{total_holes}</div></div>", unsafe_allow_html=True)
-
-            st.markdown("---")
-            st.subheader("📈 Race Telemetry (Trend)")
+            # KPI Cards
+            c1, c2, c3 = st.columns(3)
+            avg = dff["Resultat"].mean()
+            best = dff.groupby(["Datum", "Spelare"])["Resultat"].sum().min()
+            
+            c1.markdown(f"<div class='stat-card'><div class='stat-label'>Snitt (Hål)</div><div class='stat-value'>{avg:.2f}</div></div>", unsafe_allow_html=True)
+            c2.markdown(f"<div class='stat-card'><div class='stat-label'>Personbästa (Runda)</div><div class='stat-value'>{int(best) if not np.isnan(best) else '-'}</div></div>", unsafe_allow_html=True)
+            c3.markdown(f"<div class='stat-card'><div class='stat-label'>Antal Hål</div><div class='stat-value'>{len(dff)}</div></div>", unsafe_allow_html=True)
+            
+            st.divider()
+            
+            # Trend Chart
             round_scores = dff.groupby(["Datum", "Spelare"])["Resultat"].mean().reset_index()
-            chart = alt.Chart(round_scores).mark_line(point=True).encode(x='Datum:T', y=alt.Y('Resultat', title='Snittscore', scale=alt.Scale(zero=False)), color='Spelare', tooltip=['Datum', 'Spelare', 'Resultat']).properties(height=300)
+            chart = alt.Chart(round_scores).mark_line(point=True).encode(
+                x='Datum:T', y=alt.Y('Resultat', scale=alt.Scale(zero=False)), color='Spelare', tooltip=['Datum', 'Spelare', 'Resultat']
+            ).interactive()
             st.altair_chart(chart, use_container_width=True)
+        else: st.info("Ingen data än.")
 
-            st.markdown("---")
-            st.subheader("🧩 Sector Analysis (Hål)")
-            try:
-                dff['Hål_Int'] = pd.to_numeric(dff['Hål'], errors='coerce')
-                hole_stats = dff.groupby(['Hål_Int', 'Spelare'])['Resultat'].mean().reset_index()
-                h_chart = alt.Chart(hole_stats).mark_bar().encode(x=alt.X('Hål_Int:O', title='Hål'), y=alt.Y('Resultat', title='Snitt'), color='Spelare', xOffset='Spelare', tooltip=['Hål_Int', 'Spelare', 'Resultat'])
-                st.altair_chart(h_chart, use_container_width=True)
-            except: st.warning("Kunde inte visualisera hål-data.")
+    with st2:
+        # AERO LAB (DISC CHART)
+        if st.session_state.active_players:
+            p = st.session_state.active_players[0]
+            my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
+            
+            st.subheader(f"Flight Chart: {p}")
+            if not my_inv.empty:
+                # Scatter Plot: Turn vs Fade
+                chart = alt.Chart(my_inv).mark_circle(size=150).encode(
+                    x=alt.X('Turn', scale=alt.Scale(domain=[-5, 2])),
+                    y=alt.Y('Fade', scale=alt.Scale(domain=[0, 6])),
+                    color=alt.Color('Typ'),
+                    tooltip=['Modell', 'Speed', 'Glide', 'Turn', 'Fade']
+                ).properties(height=400).interactive()
+                st.altair_chart(chart, use_container_width=True)
+                
+                # Performance (Om data finns)
+                if not df.empty:
+                    st.divider()
+                    st.markdown("**Disc Performance**")
+                    disc_stats = df[df["Spelare"]==p].groupby("Disc_Used")["Resultat"].mean().reset_index().sort_values("Resultat")
+                    st.bar_chart(disc_stats.set_index("Disc_Used"))
+            else: st.warning("Tom väska.")
+        else: st.info("Välj spelare i menyn.")
 
-            st.markdown("---")
-            st.subheader("🛞 Tyre Strategy (Disc Performance)")
-            disc_stats = dff[~dff["Disc_Used"].isin(["Unknown", "Välj Disc", "None", None])]
-            if not disc_stats.empty:
-                ds = disc_stats.groupby("Disc_Used")["Resultat"].agg(['mean', 'count']).reset_index()
-                ds = ds[ds['count'] > 1].sort_values('mean')
-                d_chart = alt.Chart(ds.head(10)).mark_bar().encode(x=alt.X('Disc_Used', sort='-y', title='Disc'), y=alt.Y('mean', title='Snittscore'), color=alt.Color('mean', scale=alt.Scale(scheme='redyellowgreen', reverse=True)), tooltip=['Disc_Used', 'mean', 'count'])
-                st.altair_chart(d_chart, use_container_width=True)
-            else: st.info("Ingen disc-data tillgänglig än.")
-        else: st.info("Ingen data för valt filter.")
-    else: st.info("Databasen är tom. Gå till Race-fliken och kör!")
+    with st3:
+        # SECTOR ANALYSIS (HOLES)
+        if not df.empty:
+            sel_b = st.selectbox("Välj Bana för Analys", df["Bana"].unique())
+            hdf = df[df["Bana"]==sel_b]
+            
+            if not hdf.empty:
+                # Heatmap Logic
+                hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
+                chart = alt.Chart(hdf).mark_rect().encode(
+                    x=alt.X('Hål_Int:O', title='Hål'),
+                    y=alt.Y('Spelare', title='Förare'),
+                    color=alt.Color('mean(Resultat)', scale=alt.Scale(scheme='redyellowgreen', reverse=True), title='Snitt'),
+                    tooltip=['Spelare', 'Hål_Int', 'mean(Resultat)']
+                ).properties(height=200)
+                st.altair_chart(chart, use_container_width=True)
+            else: st.info("Ingen data för denna bana.")
 
 # TAB 6: ADMIN
 with t6:
@@ -631,7 +640,6 @@ with t7:
         if st.button("Starta Nytt Pass", type="primary"):
             st.session_state.putt_session = []
             if game_mode == "JYLY (Classic)":
-                # 5, 6, 7, 8, 9, 10m (5 kast per station)
                 for d in [5, 6, 7, 8, 9, 10]: st.session_state.putt_session.append({"Dist": d, "Kast": 5, "Träff": 0})
             elif game_mode == "Jorden Runt":
                 for d in [4, 5, 6, 7, 8, 9, 10]: st.session_state.putt_session.append({"Dist": d, "Kast": 3, "Träff": 0})
@@ -646,32 +654,23 @@ with t7:
     with c2:
         if st.session_state.putt_session:
             st.markdown(f"### 📋 Pågående: {game_mode}")
+            total_hits = 0; total_throws = 0
             
-            total_hits = 0
-            total_throws = 0
-            
-            # Visa stationer
             for i, station in enumerate(st.session_state.putt_session):
                 with st.container(border=True):
                     cols = st.columns([2, 2, 1])
                     cols[0].metric(f"Station {i+1}", f"{station['Dist']}m")
-                    
-                    # Slider för att logga träffar
                     res = cols[1].slider(f"Träffar (av {station['Kast']})", 0, station['Kast'], station['Träff'], key=f"putt_{i}")
                     st.session_state.putt_session[i]["Träff"] = res
-                    
-                    total_hits += res
-                    total_throws += station['Kast']
+                    total_hits += res; total_throws += station['Kast']
             
             st.divider()
             score_col, chart_col = st.columns(2)
-            score_col.metric("Total Score", f"{total_hits}/{total_throws}", f"{int((total_hits/total_throws)*100)}%")
+            pct = int((total_hits/total_throws)*100) if total_throws > 0 else 0
+            score_col.metric("Total Score", f"{total_hits}/{total_throws}", f"{pct}%")
             
             if st.button("🏁 Avsluta & Spara Pass"):
-                # Här skulle man kunna spara till history om man vill
-                st.balloons()
-                st.success("Bra jobbat! Vila armen.")
-                st.session_state.putt_session = []
-                st.rerun()
+                st.balloons(); st.success("Bra jobbat! Vila armen.")
+                st.session_state.putt_session = []; st.rerun()
         else:
             st.info("Starta ett pass till vänster.")
