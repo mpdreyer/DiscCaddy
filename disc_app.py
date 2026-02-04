@@ -89,6 +89,10 @@ def save_to_sheet(df, worksheet_name):
         sheet = client.open("DiscCaddy_DB")
         try: ws = sheet.worksheet(worksheet_name)
         except: ws = sheet.add_worksheet(worksheet_name, 100, 10)
+        # SÄKERHET: Rensa inte om dataframe är helt tom (förutom headers) om det verkar fel
+        if df.empty and worksheet_name == "Inventory":
+             # Om vi försöker spara en tom inventory, varna hellre än radera allt
+             pass 
         ws.clear(); ws.update([df.columns.values.tolist()] + df.values.tolist())
     except Exception as e: st.error(f"Save Error: {e}")
 
@@ -286,7 +290,7 @@ if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v48.0 Data & Video Telemetry")
+    st.caption("🟢 v49.0 Safety Car Update")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -324,11 +328,27 @@ with st.sidebar:
         hole_wind = st.radio("Vind på tee:", ["Stilla", "Mot", "Med", "Sida"], horizontal=True)
 
     st.divider()
+    
+    # 2. SPELARE (Updated for Robustness)
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
+    
+    new_p = st.text_input("Ny spelare / Återställ:", placeholder="Namn")
+    if st.button("Lägg till") and new_p:
+        # Create start kit row
+        start_kit = [{"Owner": new_p, "Modell": "Start Putter", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Status": "Bag"}]
+        # Append safe
+        st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
+        # Force save
+        save_to_sheet(st.session_state.inventory, "Inventory")
+        # Clear cache to force reload next time
+        st.cache_resource.clear()
+        st.success("Spelare skapad/återställd!"); st.rerun()
+
     active = st.multiselect("Spelare", all_owners, default=st.session_state.active_players)
     if active != st.session_state.active_players:
         st.session_state.active_players = active
         st.rerun()
+        
     if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
 t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 TELEMETRY", "⚙️ ADMIN", "🎓 ACADEMY"])
@@ -596,6 +616,7 @@ with t5:
         if not df.empty:
             sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
             sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=df["Spelare"].unique())
+            
             hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"].isin(sel_p_sec))]
             
             if not hdf.empty:
