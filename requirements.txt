@@ -7,4 +7,6 @@ streamlit-folium
 geopy
 altair
 openai
+gspread
+oauth2client
 Pillow
