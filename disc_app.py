@@ -19,7 +19,6 @@ SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 
 @st.cache_resource
 def get_gsheet_client():
-    # Hämtar nycklar från Streamlit Secrets
     try:
         creds_dict = st.secrets["gcp_service_account"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
@@ -35,34 +34,29 @@ def load_data_from_sheet():
         sheet = client.open("DiscCaddy_DB")
         
         # --- INVENTORY ---
-        try:
-            ws_inv = sheet.worksheet("Inventory")
+        try: ws_inv = sheet.worksheet("Inventory")
         except:
             ws_inv = sheet.add_worksheet("Inventory", 100, 10)
             ws_inv.append_row(["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
             
         inv_data = ws_inv.get_all_records()
         df_inv = pd.DataFrame(inv_data)
-        # Säkra kolumner om arket är tomt men har rubriker
-        expected_inv = ["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"]
-        if df_inv.empty: df_inv = pd.DataFrame(columns=expected_inv)
+        if df_inv.empty: df_inv = pd.DataFrame(columns=["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
         
         # --- HISTORY ---
-        try:
-            ws_hist = sheet.worksheet("History")
+        try: ws_hist = sheet.worksheet("History")
         except:
             ws_hist = sheet.add_worksheet("History", 100, 10)
             ws_hist.append_row(["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
             
         hist_data = ws_hist.get_all_records()
         df_hist = pd.DataFrame(hist_data)
-        expected_hist = ["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"]
-        if df_hist.empty: df_hist = pd.DataFrame(columns=expected_hist)
+        if df_hist.empty: df_hist = pd.DataFrame(columns=["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
         
         return df_inv, df_hist
 
     except Exception as e:
-        st.error(f"Kunde inte ladda databasen: {e}")
+        st.error(f"Databas-fel: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 def save_to_sheet(df, worksheet_name):
@@ -72,11 +66,9 @@ def save_to_sheet(df, worksheet_name):
         sheet = client.open("DiscCaddy_DB")
         try: ws = sheet.worksheet(worksheet_name)
         except: ws = sheet.add_worksheet(worksheet_name, 100, 10)
-        
         ws.clear()
         ws.update([df.columns.values.tolist()] + df.values.tolist())
-    except Exception as e:
-        st.error(f"Kunde inte spara: {e}")
+    except Exception as e: st.error(f"Sparfel: {e}")
 
 # AI Setup
 def ask_ai(messages):
@@ -101,12 +93,10 @@ def analyze_image(image_bytes):
 
 # --- 2. STATE ---
 if 'data_loaded' not in st.session_state:
-    with st.spinner("Kopplar upp mot molnet..."):
+    with st.spinner("Laddar molndata..."):
         i, h = load_data_from_sheet()
         st.session_state.inventory = i
         st.session_state.history = h
-    
-    # Banor (Static Backup)
     st.session_state.courses = {
         "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": "Rak"} for x,y in zip(range(1,10), [63,81,48,65,75,55,62,78,52])}},
         "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
@@ -121,61 +111,37 @@ if 'daily_forms' not in st.session_state: st.session_state.daily_forms = {}
 if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 if 'ai_disc_data' not in st.session_state: st.session_state.ai_disc_data = None
 
-# --- 3. LOGIK (SMART CADDY v23 RESTORED) ---
+# --- 3. LOGIK ---
 def suggest_disc(bag, player, dist, shape, form=1.0):
     pb = bag[(bag["Owner"]==player) & (bag["Status"]=="Bag")]
     if pb.empty: return None, "Tom väska"
     
-    # Justera för form
     eff_dist = dist / max(form, 0.5)
     target_speed = eff_dist / 10.0
-    
     candidates = pb.copy()
-    candidates["Speed_Diff"] = abs(candidates["Speed"] - target_speed)
+    candidates["Score"] = abs(candidates["Speed"] - target_speed)
     
     if eff_dist < 40: candidates = candidates[candidates["Typ"]=="Putter"]
-    elif eff_dist < 75: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
-    elif eff_dist < 100: candidates = candidates[candidates["Typ"].isin(["Midrange", "Fairway Driver"])]
+    elif eff_dist < 80: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
     
     if candidates.empty: candidates = pb
     
-    # Form-anpassning
-    if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Turn"] * 0.5)
-    else: candidates["Score"] = candidates["Speed_Diff"]
+    if form < 0.9: candidates["Score"] += (candidates["Turn"] * 0.5)
     
-    if shape == "Höger": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Forehand"
-    elif shape == "Vänster": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Backhand Hyzer"
-    else: 
-        candidates["Neu"] = abs(candidates["Turn"] + candidates["Fade"])
-        best = candidates.sort_values(by=["Score", "Neu"], ascending=[True, True]).iloc[0]; reason="Rakt"
+    if shape == "Höger": best = candidates.sort_values("Fade", ascending=False).iloc[0]; reason="Forehand"
+    elif shape == "Vänster": best = candidates.sort_values("Fade", ascending=False).iloc[0]; reason="Hyzer"
+    else: best = candidates.sort_values("Turn", ascending=True).iloc[0]; reason="Rakt"
         
     return best, reason
-
-def simulate_flight_path_hd(speed, glide, turn, fade, power, throw_type="Backhand"):
-    req_power = speed * 10.0; p_factor = min(power / req_power if req_power > 0 else 1.0, 1.2)
-    eff_turn = max(turn, turn * ((p_factor - 0.7) * 2.5)) if p_factor > 0.8 else 0
-    eff_fade = fade * (1.5 / max(p_factor, 0.3)) if p_factor < 0.8 else fade
-    fade_start = max(0.2, p_factor - 0.2) if p_factor < 0.8 else 0.7
-    steps = 200; x = []; y = []; total_dist = power * (1 + (glide/40.0)) * (0.85 if speed > 10 and power < 70 else 1.0)
-    for i in range(steps):
-        t = i / steps; y.append(t * total_dist)
-        turn_p = np.sin(t * np.pi) * (1-t)
-        fade_p = ((t - fade_start)/(1 - fade_start))**2 if t > fade_start else 0
-        val = (eff_turn * turn_p * 2.5) + (eff_fade * fade_p * -4.0)
-        x.append(-val)
-    if throw_type == "Forehand": x = [-v for v in x]
-    return x, y
 
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 Live")
+    st.caption("🟢 v28.1 Crash Proof")
     
-    # Lobby Logic
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
-    # Lägg till spelare om listan är tom
-    new_p = st.text_input("Ny spelare (Skapa)", placeholder="Namn")
+    new_p = st.text_input("Ny spelare:", placeholder="Namn")
     if st.button("Lägg till") and new_p:
         start_kit = [{"Owner": new_p, "Modell": "Start Putter", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Status": "Bag"}]
         st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
@@ -185,7 +151,6 @@ with st.sidebar:
     active = st.multiselect("Välj Spelare", all_owners, default=st.session_state.active_players)
     if active != st.session_state.active_players:
         st.session_state.active_players = active
-        # Nollställ form för nya spelare
         for p in active:
             if p not in st.session_state.daily_forms: st.session_state.daily_forms[p] = 1.0
         st.rerun()
@@ -194,18 +159,17 @@ with st.sidebar:
         st.cache_resource.clear()
         st.rerun()
 
-# VIKTIGT: 6 FLIKAR NU!
 t1, t2, t3, t4, t5, t6 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📊 STATS", "⚙️ ADMIN"])
 
 # TAB 1: WARM-UP
 with t1:
     st.header("🔥 Kalibrering")
     if st.session_state.active_players:
-        p = st.selectbox("Justera form för:", st.session_state.active_players)
+        p = st.selectbox("Formkoll:", st.session_state.active_players)
         f_val = st.slider(f"Dagsform {p} (%)", 50, 150, 100, key=f"form_{p}")
         st.session_state.daily_forms[p] = f_val / 100.0
-        st.metric("Effektiv kraft", f"{f_val}%")
-    else: st.info("Välj spelare i sidomenyn för att börja.")
+        st.metric("Effekt", f"{f_val}%")
+    else: st.info("Välj spelare i sidomenyn.")
 
 # TAB 2: RACE
 with t2:
@@ -222,12 +186,23 @@ with t2:
         st.caption(inf.get('shape', 'Rak'))
 
     with col_s:
-        if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {p: inf['p'] for p in st.session_state.active_players}
-        if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {p: None for p in st.session_state.active_players}
-        
+        # --- KRASCH-SKYDD: INITIERING ---
+        if hole not in st.session_state.current_scores: 
+            st.session_state.current_scores[hole] = {}
+        if hole not in st.session_state.selected_discs: 
+            st.session_state.selected_discs[hole] = {}
+            
+        # Se till att alla aktiva spelare finns i listan för detta hål
         for p in st.session_state.active_players:
+            if p not in st.session_state.current_scores[hole]:
+                st.session_state.current_scores[hole][p] = inf['p'] # Default Par
+            if p not in st.session_state.selected_discs[hole]:
+                st.session_state.selected_discs[hole][p] = None
+
+        # --- SCOREKORT ---
+        for p in st.session_state.active_players:
+            # Nu är vi säkra på att p finns i current_scores[hole]
             with st.expander(f"{p} - {st.session_state.current_scores[hole][p]}", expanded=True):
-                # Form-aware Caddy
                 curr_form = st.session_state.daily_forms.get(p, 1.0)
                 rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form)
                 
@@ -243,7 +218,7 @@ with t2:
                 opts = ["Välj"] + p_bag["Modell"].tolist()
                 st.session_state.selected_discs[hole][p] = st.selectbox("Disc", opts, key=f"d_{hole}_{p}")
 
-    if st.button("🏁 SPARA TILL MOLNET", type="primary"):
+    if st.button("🏁 SPARA RUNDA", type="primary"):
         new_rows = []
         d = datetime.now().strftime("%Y-%m-%d")
         for h, scores in st.session_state.current_scores.items():
@@ -254,7 +229,7 @@ with t2:
         new_df = pd.DataFrame(new_rows)
         st.session_state.history = pd.concat([st.session_state.history, new_df], ignore_index=True)
         save_to_sheet(st.session_state.history, "History")
-        st.balloons(); st.success("Rundan sparad!"); st.session_state.current_scores = {}
+        st.balloons(); st.success("Sparat!"); st.session_state.current_scores = {}
 
 # TAB 3: AI-CADDY
 with t3:
@@ -262,7 +237,7 @@ with t3:
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Fråga caddyn..."):
+    if prompt := st.chat_input("Fråga..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         
@@ -285,7 +260,6 @@ with t4:
     st.header("🧳 Moln-Bag")
     owner = st.selectbox("Hantera", st.session_state.active_players) if st.session_state.active_players else None
     
-    # KAMERA FIX: Gömd bakom expander/checkbox så den inte autostartar
     with st.expander("📸 Lägg till Disc med Kamera"):
         if st.checkbox("Starta Kamera"):
             img_file = st.camera_input("Fota discen")
@@ -300,12 +274,11 @@ with t4:
                             st.success("Hittad!")
                         except: st.error("Försök igen.")
 
-    # Formulär
     with st.form("add_cloud"):
         ai_d = st.session_state.ai_disc_data if st.session_state.ai_disc_data else {}
         c1, c2 = st.columns(2)
         mn = c1.text_input("Modell", value=ai_d.get("Modell", ""))
-        ty = c2.selectbox("Typ", ["Putter", "Midrange", "Fairway Driver", "Distance Driver"], index=0) # Index fix kan läggas till
+        ty = c2.selectbox("Typ", ["Putter", "Midrange", "Fairway Driver", "Distance Driver"], index=0)
         c3, c4, c5, c6 = st.columns(4)
         sp = c3.number_input("Speed", 0.0, 15.0, float(ai_d.get("Speed", 7.0)))
         gl = c4.number_input("Glide", 0.0, 7.0, float(ai_d.get("Glide", 5.0)))
@@ -340,11 +313,9 @@ with t5:
             except: st.bar_chart(dff.groupby("Hål")["Resultat"].mean())
     else: st.info("Databasen är tom.")
 
-# TAB 6: ADMIN (ÅTERSTÄLLD!)
+# TAB 6: ADMIN
 with t6:
     st.subheader("⚙️ Admin & Import")
-    
-    st.markdown("### 📥 Importera UDisc CSV")
     up = st.file_uploader("Ladda upp CSV", type=['csv'])
     if up and st.button("Kör Import"):
         try:
