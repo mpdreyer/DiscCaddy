@@ -11,6 +11,7 @@ from openai import OpenAI
 import base64
 import json
 import matplotlib.pyplot as plt
+import requests
 
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
@@ -80,6 +81,23 @@ def save_to_sheet(df, worksheet_name):
         ws.update([df.columns.values.tolist()] + df.values.tolist())
     except Exception as e: st.error(f"Sparfel: {e}")
 
+# Weather API (Open-Meteo)
+def get_live_weather(lat, lon):
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms"
+        res = requests.get(url)
+        data = res.json()
+        if "current_weather" in data:
+            return data["current_weather"]
+    except:
+        pass
+    return None
+
+def get_wind_direction_str(degrees):
+    val = int((degrees/22.5) + .5)
+    arr = ["N", "NNO", "NO", "ONO", "O", "OSO", "SO", "SSO", "S", "SSV", "SV", "VSV", "V", "VNV", "NV", "NNV"]
+    return arr[(val % 16)]
+
 # AI Setup
 def ask_ai(messages):
     try:
@@ -135,37 +153,30 @@ if 'ai_disc_data' not in st.session_state: st.session_state.ai_disc_data = None
 if 'camera_active' not in st.session_state: st.session_state.camera_active = False
 if 'suggested_pack' not in st.session_state: st.session_state.suggested_pack = []
 if 'warmup_shots' not in st.session_state: st.session_state.warmup_shots = []
+if 'weather_data' not in st.session_state: st.session_state.weather_data = {"temp": 20, "wind": 2, "dir": 0}
 
 # --- 3. LOGIK ---
-def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_dir="Stilla"):
+def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_type="Stilla"):
     pb = bag[(bag["Owner"]==player) & (bag["Status"]=="Bag")]
     if pb.empty: return None, "Tom väska"
     
-    # Justera effektiv distans baserat på dagsform
     eff_dist = dist / max(form, 0.5)
-    
-    # Justera target speed baserat på vind
-    # Motvind = Discen beter sig som lägre speed/mer understabil -> Vi behöver mer stabilitet
-    # Medvind = Discen beter sig som mer överstabil -> Vi behöver understabilitet/glide
-    
     target_speed = eff_dist / 10.0
     
     pb = pb.copy()
     for c in ["Speed", "Turn", "Fade"]:
         pb[c] = pd.to_numeric(pb[c], errors='coerce').fillna(0)
     
-    # VIND-JUSTERING AV DISCARNA
-    if "Motvind" in wind_dir:
-        # Motvind gör discen mer "Turny". Vi låtsas att discens Turn är lägre än den är för att hitta stabilare discar.
-        pb["Eff_Turn"] = pb["Turn"] - (wind_str * 0.5) 
+    # VIND-JUSTERING
+    advice_suffix = ""
+    if "Motvind" in wind_type:
+        pb["Eff_Turn"] = pb["Turn"] - (wind_str * 0.4) 
         advice_suffix = " (Motvind: Välj Stabil)"
-    elif "Medvind" in wind_dir:
-        # Medvind gör discen mer stabil. Vi behöver discar med högre Turn (mindre stabil) eller mer Glide.
+    elif "Medvind" in wind_type:
         pb["Eff_Turn"] = pb["Turn"] + (wind_str * 0.3)
         advice_suffix = " (Medvind: Välj Glide/Turn)"
     else:
         pb["Eff_Turn"] = pb["Turn"]
-        advice_suffix = ""
 
     pb["Speed_Diff"] = abs(pb["Speed"] - target_speed)
     candidates = pb.copy()
@@ -176,7 +187,6 @@ def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_dir="Still
     
     if candidates.empty: candidates = pb
     
-    # Score baseras nu på Eff_Turn (Vindjusterad)
     if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Eff_Turn"] * 0.5)
     else: candidates["Score"] = candidates["Speed_Diff"]
     
@@ -207,16 +217,40 @@ def generate_smart_bag(inventory, player, course_name):
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v35.0 Aero-Dynamic")
+    st.caption("🟢 v36.0 Live Weather")
     
-    # VÄDERSTATION
-    with st.expander("🌪️ Väderstation", expanded=True):
-        wind_str = st.slider("Vindstyrka (m/s)", 0, 15, 2)
-        wind_dir = st.radio("Vindriktning", ["Stilla", "Motvind", "Medvind", "Sidvind"], index=0)
-        temp = st.slider("Temperatur (°C)", -5, 35, 20)
+    # 1. BANA & VÄDER (GPS)
+    course_names = list(st.session_state.courses.keys())
+    # Spara vald bana i session state så den "följer med"
+    if 'selected_course' not in st.session_state: st.session_state.selected_course = course_names[0]
     
+    sel_course = st.selectbox("📍 Välj Bana", course_names, key="course_selector")
+    
+    # Om bana ändras eller väder saknas, hämta nytt
+    if sel_course != st.session_state.selected_course or 'weather_fetched' not in st.session_state:
+        st.session_state.selected_course = sel_course
+        c_loc = st.session_state.courses[sel_course]
+        w = get_live_weather(c_loc["lat"], c_loc["lon"])
+        if w:
+            st.session_state.weather_data = {"temp": w["temperature"], "wind": w["windspeed"], "dir": w["winddirection"]}
+            st.session_state.weather_fetched = True
+    
+    # Visa Väder
+    wd = st.session_state.weather_data
+    wind_arrow = get_wind_direction_str(wd['dir'])
+    
+    with st.container(border=True):
+        c_w1, c_w2 = st.columns(2)
+        c_w1.metric("Temp", f"{wd['temp']}°C")
+        c_w2.metric("Vind", f"{wd['wind']} m/s", wind_arrow)
+        
+        # Hole direction input (Viktigt för Motvind/Medvind)
+        st.markdown("**På Tee:**")
+        hole_wind = st.radio("Vindriktning för Hålet:", ["Stilla", "Motvind", "Medvind", "Sidvind"], index=1 if wd['wind']>4 else 0, horizontal=True)
+
     st.divider()
     
+    # 2. SPELARE
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
     new_p = st.text_input("Ny spelare:", placeholder="Namn")
@@ -239,14 +273,13 @@ with st.sidebar:
 
 t1, t2, t3, t4, t5, t6 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📊 STATS", "⚙️ ADMIN"])
 
-# TAB 1: WARM-UP (Physics Engine + Styles + Disc Potential)
+# TAB 1: WARM-UP
 with t1:
     st.header("🔥 Driving Range")
     
     if st.session_state.active_players:
         curr_p = st.selectbox("Kalibrera Spelare:", st.session_state.active_players)
         
-        # Hämta discar
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
         disc_options = ["Välj Disc"] + p_inv["Modell"].unique().tolist()
         
@@ -257,8 +290,6 @@ with t1:
             with st.container(border=True):
                 st.subheader("1. Kasta & Mät")
                 sel_disc_name = st.selectbox("Vilken disc?", disc_options)
-                
-                # NYTT: Välj stil
                 style = st.radio("Kast-stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
                 
                 c_d, c_s = st.columns(2)
@@ -287,69 +318,56 @@ with t1:
             if st.session_state.warmup_shots:
                 shots_df = pd.DataFrame(st.session_state.warmup_shots)
                 st.dataframe(shots_df[["disc", "style", "len", "side"]], hide_index=True, height=150)
-                
                 if st.button("🗑️ Rensa lista"):
-                    st.session_state.warmup_shots = []
-                    st.rerun()
+                    st.session_state.warmup_shots = []; st.rerun()
             else:
                 st.info("Inga kast registrerade än.")
 
         st.markdown("---")
         
-        # --- DEL 3: RESULTAT & DISC-POTENTIAL ---
+        # --- DEL 3: RESULTAT ---
         if st.session_state.warmup_shots:
             st.subheader("3. Analys & Form")
-            
             shots = st.session_state.warmup_shots
             
-            # Beräkna Formfaktor baserat på DISCENS Potential (Speed * 10)
             total_potential_ratio = 0
             total_tech_side = 0
             
             for s in shots:
-                # 1. Discens Optimala Längd (Tumregel: Speed * 10m)
-                # En Speed 12 ska gå 120m. En Speed 3 ska gå 30-40m.
                 optimal_dist = max(s["speed"] * 10.0, 40.0) 
                 ratio = s["len"] / optimal_dist
                 total_potential_ratio += ratio
                 
-                # 2. Teknik-analys (Sida)
                 req_dist = s["speed"] * 10.0
                 power_ratio = s["len"] / req_dist if req_dist > 0 else 1.0
                 expected_fade = s["fade"]
                 expected_turn = s["turn"] if power_ratio > 0.9 else 0
                 
-                if "Backhand" in s["style"]:
-                    fade_dir = -1; turn_dir = 1
-                else: 
-                    fade_dir = 1; turn_dir = -1
+                if "Backhand" in s["style"]: fade_dir = -1; turn_dir = 1
+                else: fade_dir = 1; turn_dir = -1
 
                 if power_ratio < 0.8: natural_side = (expected_fade * 3 * fade_dir)
                 else: natural_side = (expected_turn * 2 * turn_dir) + (expected_fade * 2 * fade_dir)
                 
                 total_tech_side += (s["side"] - natural_side)
 
-            # Slutlig Form
             avg_form = total_potential_ratio / len(shots)
             avg_tech_side = total_tech_side / len(shots)
-            
-            # Spara formen
             st.session_state.daily_forms[curr_p] = avg_form
 
             c_res, c_gr = st.columns(2)
-            
             with c_res:
                 st.metric("Utnyttjad Potential", f"{int(avg_form*100)}%")
-                st.caption("Jämfört med vad dina discar är designade för.")
+                st.caption("Jämfört med discens design.")
                 
-                if avg_form > 1.0: st.success("💪 Du kastar längre än discens rating!")
-                elif avg_form < 0.7: st.warning("⚠️ Du får inte upp discarna i fart.")
+                if avg_form > 1.0: st.success("💪 Enorm kraft!")
+                elif avg_form < 0.7: st.warning("⚠️ Låg kraftöverföring.")
                 
                 st.markdown("**Teknik:**")
                 if abs(avg_tech_side) < 7: st.success("✅ Rena träffar!")
                 else: 
                     dir_txt = "Vänster" if avg_tech_side < 0 else "Höger"
-                    st.warning(f"⚠️ Teknikfel: Missar {dir_txt} om linjen ({int(abs(avg_tech_side))}m).")
+                    st.warning(f"⚠️ Teknikfel: {dir_txt} om linjen ({int(abs(avg_tech_side))}m).")
                     
             with c_gr:
                 fig, ax = plt.subplots(figsize=(4,4))
@@ -366,9 +384,10 @@ with t1:
 
 # TAB 2: RACE
 with t2:
-    courses = list(st.session_state.courses.keys())
-    bana = st.selectbox("Bana", courses)
+    # Använd vald bana från sidebar
+    bana = st.session_state.get('selected_course', list(st.session_state.courses.keys())[0])
     c_data = st.session_state.courses[bana]
+    
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
@@ -384,8 +403,9 @@ with t2:
         for p in st.session_state.active_players:
             with st.expander(f"{p} - {st.session_state.current_scores[hole][p]}", expanded=True):
                 curr_form = st.session_state.daily_forms.get(p, 1.0)
-                # SKICKA MED VIND-DATA HÄR
-                rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form, wind_str, wind_dir)
+                # Använd väderdata från state
+                w_str = st.session_state.weather_data['wind']
+                rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form, w_str, hole_wind)
                 if rec is not None: st.success(f"Caddy: {rec['Modell']} ({reason})")
                 else: st.warning("Tom väska")
                 c1, c2, c3 = st.columns([1,2,1])
@@ -438,7 +458,7 @@ with t4:
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
-        tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()))
+        tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()), key="strat_course")
         if c2.button("Generera"): st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, owner, tc); st.rerun()
         if st.session_state.suggested_pack:
             pack_names = st.session_state.inventory.loc[st.session_state.suggested_pack, "Modell"].tolist()
