@@ -134,6 +134,7 @@ if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 if 'ai_disc_data' not in st.session_state: st.session_state.ai_disc_data = None
 if 'camera_active' not in st.session_state: st.session_state.camera_active = False
 if 'suggested_pack' not in st.session_state: st.session_state.suggested_pack = []
+if 'warmup_shots' not in st.session_state: st.session_state.warmup_shots = []
 
 # --- 3. LOGIK ---
 def suggest_disc(bag, player, dist, shape, form=1.0):
@@ -186,7 +187,7 @@ def generate_smart_bag(inventory, player, course_name):
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v32.0 Precision Range")
+    st.caption("🟢 v34.0 Ambidextrous")
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -210,97 +211,134 @@ with st.sidebar:
 
 t1, t2, t3, t4, t5, t6 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📊 STATS", "⚙️ ADMIN"])
 
-# TAB 1: WARM-UP (THE DRIVING RANGE)
+# TAB 1: WARM-UP (Physics Engine + Styles)
 with t1:
-    st.header("🔥 Driving Range & Kalibrering")
+    st.header("🔥 Driving Range")
+    
     if st.session_state.active_players:
-        curr_p = st.selectbox("Kalibrera:", st.session_state.active_players)
+        curr_p = st.selectbox("Kalibrera Spelare:", st.session_state.active_players)
         
-        # Hämta spelarens discar för listan
+        # Hämta discar
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
         disc_options = ["Välj Disc"] + p_inv["Modell"].unique().tolist()
         
-        with st.expander("⚙️ Inställningar (Ditt Normala Max)", expanded=True):
-            ref_dist = st.number_input(f"Normal Maxlängd för {curr_p} (m)", 40, 150, 80, step=5, help="Används för att beräkna dagsform.")
+        c_in, c_list = st.columns([1, 1])
         
-        st.markdown("### 🏹 Mata in kast")
-        c1, c2, c3 = st.columns(3)
-        
-        # Data structure: [len, side, color, label]
-        points = []
-        
-        with c1:
-            st.markdown("**Set 1 (Röd)**")
-            d1 = st.selectbox("Disc Set 1", disc_options, key="s1_d")
-            l1 = st.number_input("K1 Längd", 0, 200, 0, key="s1k1l"); s1 = st.number_input("K1 Sida", -50, 50, 0, key="s1k1s")
-            l2 = st.number_input("K2 Längd", 0, 200, 0, key="s1k2l"); s2 = st.number_input("K2 Sida", -50, 50, 0, key="s1k2s")
-            l3 = st.number_input("K3 Längd", 0, 200, 0, key="s1k3l"); s3 = st.number_input("K3 Sida", -50, 50, 0, key="s1k3s")
-            if l1>0: points.append([l1, s1, '#cc0000', d1])
-            if l2>0: points.append([l2, s2, '#cc0000', d1])
-            if l3>0: points.append([l3, s3, '#cc0000', d1])
-
-        with c2:
-            st.markdown("**Set 2 (Blå)**")
-            d2 = st.selectbox("Disc Set 2", disc_options, key="s2_d")
-            l4 = st.number_input("K1 Längd", 0, 200, 0, key="s2k1l"); s4 = st.number_input("K1 Sida", -50, 50, 0, key="s2k1s")
-            l5 = st.number_input("K2 Längd", 0, 200, 0, key="s2k2l"); s5 = st.number_input("K2 Sida", -50, 50, 0, key="s2k2s")
-            l6 = st.number_input("K3 Längd", 0, 200, 0, key="s2k3l"); s6 = st.number_input("K3 Sida", -50, 50, 0, key="s2k3s")
-            if l4>0: points.append([l4, s4, '#0066cc', d2])
-            if l5>0: points.append([l5, s5, '#0066cc', d2])
-            if l6>0: points.append([l6, s6, '#0066cc', d2])
-
-        with c3:
-            st.markdown("**Set 3 (Grön)**")
-            d3 = st.selectbox("Disc Set 3", disc_options, key="s3_d")
-            l7 = st.number_input("K1 Längd", 0, 200, 0, key="s3k1l"); s7 = st.number_input("K1 Sida", -50, 50, 0, key="s3k1s")
-            l8 = st.number_input("K2 Längd", 0, 200, 0, key="s3k2l"); s8 = st.number_input("K2 Sida", -50, 50, 0, key="s3k2s")
-            l9 = st.number_input("K3 Längd", 0, 200, 0, key="s3k3l"); s9 = st.number_input("K3 Sida", -50, 50, 0, key="s3k3s")
-            if l7>0: points.append([l7, s7, '#00cc66', d3])
-            if l8>0: points.append([l8, s8, '#00cc66', d3])
-            if l9>0: points.append([l9, s9, '#00cc66', d3])
-
-        if st.button("📊 Analysera & Spara Form", type="primary"):
-            if points:
-                avg_dist = sum([p[0] for p in points]) / len(points)
-                avg_side = sum([p[1] for p in points]) / len(points)
+        # --- DEL 1: INMATNING ---
+        with c_in:
+            with st.container(border=True):
+                st.subheader("1. Kasta & Mät")
+                sel_disc_name = st.selectbox("Vilken disc?", disc_options)
                 
-                # Beräkna Form
-                form_factor = avg_dist / ref_dist
-                st.session_state.daily_forms[curr_p] = form_factor
+                # NYTT: Välj stil
+                style = st.radio("Kast-stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
                 
-                c_res, c_gr = st.columns(2)
-                with c_res:
-                    st.metric("Snittlängd", f"{int(avg_dist)}m")
-                    st.metric("Dagsform", f"{int(form_factor*100)}%")
-                    
-                    if avg_side < -5: st.warning("⚠️ Du drar VÄNSTER (Release Early?)")
-                    elif avg_side > 5: st.warning("⚠️ Du drar HÖGER (Grip Lock?)")
-                    else: st.success("✅ Rak och fin linje!")
-                    
-                    st.success(f"Caddyn är nu kalibrerad till {int(form_factor*100)}% kapacitet.")
+                c_d, c_s = st.columns(2)
+                kast_len = c_d.number_input("Längd (m)", 0, 200, 50, step=5)
+                kast_sida = c_s.number_input("Sida (m)", -50, 50, 0, step=1, help="-Vänster / +Höger")
+                
+                if st.button("➕ Registrera Kast", type="primary"):
+                    if sel_disc_name != "Välj Disc" and kast_len > 0:
+                        d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
+                        st.session_state.warmup_shots.append({
+                            "disc": sel_disc_name,
+                            "style": style,
+                            "len": kast_len,
+                            "side": kast_sida,
+                            "speed": float(d_data["Speed"]),
+                            "turn": float(d_data["Turn"]),
+                            "fade": float(d_data["Fade"])
+                        })
+                        st.success("Kast registrerat!")
+                    else:
+                        st.error("Välj disc och ange längd.")
 
-                with c_gr:
-                    # Advanced Scatter Plot
-                    fig, ax = plt.subplots(figsize=(4,4))
-                    
-                    # Rita varje set
-                    for color, label in [('#cc0000', d1), ('#0066cc', d2), ('#00cc66', d3)]:
-                        subset = [p for p in points if p[2] == color]
-                        if subset:
-                            ax.scatter([p[1] for p in subset], [p[0] for p in subset], c=color, s=100, alpha=0.7, label=label if label != "Välj Disc" else "Set")
-
-                    ax.axvline(0, color='gray', linestyle='--')
-                    ax.set_xlim(-30, 30)
-                    ax.set_ylim(0, max([p[0] for p in points])*1.2)
-                    ax.set_xlabel("Sida (m)")
-                    ax.set_ylabel("Längd (m)")
-                    ax.set_title("Träffbild")
-                    ax.legend()
-                    st.pyplot(fig)
+        # --- DEL 2: LISTA & ANALYS ---
+        with c_list:
+            st.subheader("2. Dina kast")
+            if st.session_state.warmup_shots:
+                shots_df = pd.DataFrame(st.session_state.warmup_shots)
+                # Visa stil i tabellen
+                st.dataframe(shots_df[["disc", "style", "len", "side"]], hide_index=True, height=150)
+                
+                if st.button("🗑️ Rensa lista"):
+                    st.session_state.warmup_shots = []
+                    st.rerun()
             else:
-                st.warning("Mata in minst ett kast.")
+                st.info("Inga kast registrerade än.")
 
-    else: st.info("Välj spelare i sidomenyn.")
+        st.markdown("---")
+        
+        # --- DEL 3: RESULTAT & FYSIK ---
+        if st.session_state.warmup_shots:
+            st.subheader("3. Analys")
+            ref_dist = st.number_input(f"Din normala Maxlängd (m)", 40, 150, 80)
+            
+            shots = st.session_state.warmup_shots
+            avg_len = np.mean([s["len"] for s in shots])
+            
+            total_tech_side = 0
+            
+            for s in shots:
+                req_dist = s["speed"] * 10.0 
+                power_ratio = s["len"] / req_dist if req_dist > 0 else 1.0
+                
+                expected_fade = s["fade"]
+                expected_turn = s["turn"] if power_ratio > 0.9 else 0
+                
+                # Fysik-riktningar baserat på stil (Högerhänt antagande)
+                if "Backhand" in s["style"]:
+                    fade_dir = -1 # Vänster
+                    turn_dir = 1  # Höger
+                else: # Forehand
+                    fade_dir = 1  # Höger
+                    turn_dir = -1 # Vänster
+
+                # Beräkna naturlig linje
+                if power_ratio < 0.8:
+                    natural_side = (expected_fade * 3 * fade_dir)
+                else:
+                    natural_side = (expected_turn * 2 * turn_dir) + (expected_fade * 2 * fade_dir)
+                
+                # Skillnad
+                diff = s["side"] - natural_side
+                total_tech_side += diff
+
+            avg_tech_side = total_tech_side / len(shots)
+            form_factor = avg_len / ref_dist
+            st.session_state.daily_forms[curr_p] = form_factor
+
+            c_res, c_gr = st.columns(2)
+            
+            with c_res:
+                st.metric("Snittlängd", f"{int(avg_len)}m")
+                st.metric("Dagsform (Kraft)", f"{int(form_factor*100)}%")
+                
+                st.markdown("**Teknik-analys (Stil-justerad):**")
+                # Analysera "Early" vs "Late" beror också på stil (Backhand Early = Left, Forehand Early = Left?)
+                # För enkelhetens skull, analysera Sida i förhållande till kastriktning
+                
+                if abs(avg_tech_side) < 7:
+                    st.success("✅ Bra linjer! Träffar discens tänkta bana.")
+                else:
+                    dir_text = "Vänster" if avg_tech_side < 0 else "Höger"
+                    st.warning(f"⚠️ Teknik-avvikelse: Du missar {dir_text} om den naturliga linjen (ca {int(abs(avg_tech_side))}m).")
+                    
+            with c_gr:
+                fig, ax = plt.subplots(figsize=(4,4))
+                x_vals = [s["side"] for s in shots]
+                y_vals = [s["len"] for s in shots]
+                # Färgkod: Röd=BH, Blå=FH
+                colors = ['#cc0000' if "Backhand" in s["style"] else '#0066cc' for s in shots]
+                
+                ax.scatter(x_vals, y_vals, c=colors, s=100, alpha=0.7)
+                ax.axvline(0, color='gray', linestyle='--')
+                ax.set_xlim(-40, 40)
+                ax.set_ylim(0, max(y_vals)*1.2)
+                ax.set_title("Träffbild (Röd=BH, Blå=FH)")
+                st.pyplot(fig)
+
+    else: st.info("Välj spelare i menyn.")
 
 # TAB 2: RACE
 with t2:
