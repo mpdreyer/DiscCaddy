@@ -17,19 +17,85 @@ from geopy.distance import geodesic
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
 
-# SCUDERIA LIVERY CSS
+# SCUDERIA LIVERY CSS (High Contrast Update)
 st.markdown("""
     <style>
+    /* Huvudtema */
     .stApp { background-color: #b80000; color: #ffffff; }
-    h1, h2, h3, h4 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
-    section[data-testid="stSidebar"] { background-color: #111111; border-right: 2px solid #fff200; }
-    .stat-card { background-color: #1a1a1a; border-left: 5px solid #fff200; padding: 15px; border-radius: 6px; box-shadow: 3px 3px 10px rgba(0,0,0,0.5); margin-bottom: 10px; color: white; }
+    
+    /* Rubriker */
+    h1, h2, h3, h4 { 
+        color: #fff200 !important; 
+        font-family: 'Arial Black', sans-serif; 
+        text-transform: uppercase; 
+        text-shadow: 2px 2px 0px #000000; 
+    }
+    
+    /* Sidebar */
+    section[data-testid="stSidebar"] { 
+        background-color: #111111; 
+        border-right: 3px solid #fff200; 
+    }
+    
+    /* Inputs (Text, Number, Select) - GULT med SVART TEXT */
+    div[data-baseweb="select"] > div, 
+    div[data-baseweb="input"] > div, 
+    div[data-baseweb="base-input"] {
+        background-color: #fff200 !important;
+        color: #000000 !important;
+        border-color: #000000 !important;
+        font-weight: bold;
+    }
+    
+    /* Textfärg inuti inputs */
+    input, .stSelectbox div[data-baseweb="select"] span {
+        color: #000000 !important;
+    }
+    
+    /* Dropdown-menyer (När man klickar) */
+    ul[data-baseweb="menu"] {
+        background-color: #fff200 !important;
+    }
+    ul[data-baseweb="menu"] li {
+        color: #000000 !important;
+        font-weight: bold;
+    }
+    
+    /* Knappar */
+    div.stButton > button { 
+        background-color: #000000; 
+        color: #fff200; 
+        border: 2px solid #fff200; 
+        border-radius: 4px; 
+        font-weight: bold; 
+        text-transform: uppercase; 
+    }
+    div.stButton > button:hover { 
+        background-color: #fff200; 
+        color: #000000; 
+        border-color: #000000; 
+    }
+    
+    /* Stat Cards */
+    .stat-card { 
+        background-color: #1a1a1a; 
+        border-left: 5px solid #fff200; 
+        padding: 15px; 
+        border-radius: 6px; 
+        box-shadow: 3px 3px 10px rgba(0,0,0,0.5); 
+        margin-bottom: 10px; 
+        color: white; 
+    }
     .stat-value { font-size: 26px; font-weight: bold; color: #ffffff; }
     .stat-label { font-size: 13px; text-transform: uppercase; color: #fff200; letter-spacing: 1px; font-weight: bold;}
-    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
-    div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div { background-color: #ffffff !important; color: #000000 !important; }
-    .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
+    
+    /* Expander */
+    .streamlit-expanderContent { 
+        background-color: #1a1a1a; 
+        color: white; 
+        border: 1px solid #fff200; 
+        border-radius: 0 0 5px 5px; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -49,21 +115,37 @@ def load_data_from_sheet():
     if not client: return pd.DataFrame(), pd.DataFrame()
     try:
         sheet = client.open("DiscCaddy_DB")
+        
+        # --- INVENTORY (Robust Loading) ---
         try: ws_inv = sheet.worksheet("Inventory")
         except: ws_inv = sheet.add_worksheet("Inventory", 100, 10); ws_inv.append_row(["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
+        
         inv_data = ws_inv.get_all_records()
         df_inv = pd.DataFrame(inv_data)
-        if df_inv.empty: df_inv = pd.DataFrame(columns=["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
+        
+        # Säkerställ att kolumner finns, även om arket är tomt
+        req_cols = ["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"]
+        if df_inv.empty: 
+            df_inv = pd.DataFrame(columns=req_cols)
         else:
-            for col in ["Speed", "Glide", "Turn", "Fade"]: df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0)
+            # Fyll saknade kolumner om de råkat raderas
+            for c in req_cols:
+                if c not in df_inv.columns: df_inv[c] = ""
+            
+            # Konvertera siffror säkert
+            for col in ["Speed", "Glide", "Turn", "Fade"]: 
+                df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0)
+            
             if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
             df_inv["Status"] = df_inv["Status"].fillna("Shelf")
 
+        # --- HISTORY ---
         try: ws_hist = sheet.worksheet("History")
         except: ws_hist = sheet.add_worksheet("History", 100, 10); ws_hist.append_row(["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
         hist_data = ws_hist.get_all_records()
         df_hist = pd.DataFrame(hist_data)
         if df_hist.empty: df_hist = pd.DataFrame(columns=["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
+        
         return df_inv, df_hist
     except Exception as e: st.error(f"DB Error: {e}"); return pd.DataFrame(), pd.DataFrame()
 
@@ -78,24 +160,17 @@ def save_to_sheet(df, worksheet_name):
     except Exception as e: st.error(f"Save Error: {e}")
 
 # --- EXTENDED COURSE DATABASE ---
-# Uppdaterad lista med riktiga profiler för att Strategen ska kunna jobba
 DEFAULT_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": s} for x,y,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vänster","Rak","Höger","Rak","Vänster","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Åbyvallen": {"lat": 57.480, "lon": 12.070, "holes": {str(x):{"l": 70, "p": 3, "shape": "Vänster"} for x in range(1,9)}},
-    
-    # GÖTEBORG
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
     "Skatås (Vit)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 120, "p": 3, "shape": "Lång"} for x in range(1,19)}},
-    "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}}, # Ofta kortare layout
+    "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
     "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog"} for x in range(1,19)}},
     "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 110, "p": 3, "shape": "Lång/Skog"} for x in range(1,19)}},
-    
-    # BORÅS
     "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
-    
-    # LUND
     "Sankt Hans (Lund)": {"lat": 55.723, "lon": 13.208, "holes": {str(x):{"l": 90, "p": 3, "shape": "Extrem Backe"} for x in range(1,19)}},
     "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": {str(x):{"l": 70, "p": 3, "shape": "Park"} for x in range(1,19)}},
 }
@@ -179,57 +254,34 @@ def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_type="Stil
 
 # --- SMARTER BAG GENERATOR ---
 def generate_smart_bag(inventory, player, course_name):
-    # Analysera banprofilen
     holes = st.session_state.courses[course_name]["holes"]
-    lengths = [h["l"] for h in holes.values()]
-    shapes = [h.get("shape", "Rak") for h in holes.values()]
-    
-    max_len = max(lengths)
-    min_len = min(lengths)
-    
-    # Hämta alla spelarens discar
+    lengths = [h["l"] for h in holes.values()]; shapes = [h.get("shape", "Rak") for h in holes.values()]
+    max_len = max(lengths); min_len = min(lengths)
     all_discs = inventory[inventory["Owner"] == player].copy()
-    # Säkerställ att vi har numeriska värden
     for col in ["Speed", "Glide", "Turn", "Fade"]: all_discs[col] = pd.to_numeric(all_discs[col], errors='coerce').fillna(0)
     
     pack_indices = []
     
-    # 1. THE ESSENTIALS (Alltid med)
-    # Putter (Lägst speed)
+    # Essentials
     putters = all_discs[all_discs["Typ"] == "Putter"].sort_values("Speed")
     if not putters.empty: pack_indices.append(putters.iloc[0].name)
-    
-    # Midrange (Mest glide = arbetshäst)
     mids = all_discs[all_discs["Typ"] == "Midrange"].sort_values("Glide", ascending=False)
     if not mids.empty: pack_indices.append(mids.iloc[0].name)
     
-    # 2. COURSE SPECIFIC LOGIC
-    # Fairway Driver (Om banan har hål över 70m)
+    # Course Logic
     if max_len > 70:
         fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
-        if not fairways.empty: 
-            # Ta en neutral/stabil fairway
-            pack_indices.append(fairways.sort_values("Turn", ascending=False).iloc[0].name)
-
-    # Distance Driver (BARA om banan har hål över 100m)
+        if not fairways.empty: pack_indices.append(fairways.sort_values("Turn", ascending=False).iloc[0].name)
     if max_len > 100:
         drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
         if not drivers.empty: pack_indices.append(drivers.iloc[0].name)
-        
-    # Shape Specifics
-    # Mycket vänster (Fade)? Lägg till överstabil disc
     if shapes.count("Vänster") > 3:
         overstable = all_discs.sort_values("Fade", ascending=False).iloc[0]
         if overstable.name not in pack_indices: pack_indices.append(overstable.name)
-        
-    # Mycket Höger (Turn)? Lägg till understabil disc
     if shapes.count("Höger") > 3:
         understable = all_discs.sort_values("Turn", ascending=True).iloc[0]
         if understable.name not in pack_indices: pack_indices.append(understable.name)
-        
-    # Korta banor (Min < 60m)? Lägg till Approach/Throwing Putter
     if min_len < 60 and len(putters) > 1:
-        # Ta den näst långsammaste eller en med mer fade
         throwing_putter = putters.iloc[1]
         if throwing_putter.name not in pack_indices: pack_indices.append(throwing_putter.name)
 
@@ -260,7 +312,7 @@ if 'hole_advice' not in st.session_state: st.session_state.hole_advice = {}
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v42.0 Race Engineer")
+    st.caption("🟢 v43.0 Pit Stop")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -300,7 +352,7 @@ with st.sidebar:
 
     st.divider()
     
-    all_owners = st.session_state.inventory["Owner"].unique().tolist()
+    all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     active = st.multiselect("Spelare", all_owners, default=st.session_state.active_players)
     if active != st.session_state.active_players:
         st.session_state.active_players = active
@@ -558,10 +610,8 @@ with t5:
         dff = df[(df["Spelare"].isin(sel_p)) & (df["Bana"].isin(sel_c))]
         
         if not dff.empty:
-            # 1. PADDOCK OVERVIEW (KPIs)
             st.subheader("📊 Paddock Overview")
             col1, col2, col3 = st.columns(3)
-            
             avg_score = dff["Resultat"].mean()
             best_round = dff.groupby(["Datum", "Spelare"])["Resultat"].sum().min()
             total_holes = len(dff)
@@ -570,57 +620,30 @@ with t5:
             col2.markdown(f"<div class='stat-card'><div class='stat-label'>Bästa Runda (Total)</div><div class='stat-value'>{int(best_round) if not np.isnan(best_round) else '-'}</div></div>", unsafe_allow_html=True)
             col3.markdown(f"<div class='stat-card'><div class='stat-label'>Antal Hål Spelade</div><div class='stat-value'>{total_holes}</div></div>", unsafe_allow_html=True)
 
-            # 2. TELEMETRY (Trend)
             st.markdown("---")
             st.subheader("📈 Race Telemetry (Trend)")
-            
             round_scores = dff.groupby(["Datum", "Spelare"])["Resultat"].mean().reset_index()
-            
-            chart = alt.Chart(round_scores).mark_line(point=True).encode(
-                x='Datum:T',
-                y=alt.Y('Resultat', title='Snittscore per hål', scale=alt.Scale(zero=False)),
-                color=alt.Color('Spelare', scale=alt.Scale(scheme='category10')),
-                tooltip=['Datum', 'Spelare', 'Resultat']
-            ).properties(height=300)
+            chart = alt.Chart(round_scores).mark_line(point=True).encode(x='Datum:T', y=alt.Y('Resultat', title='Snittscore', scale=alt.Scale(zero=False)), color='Spelare', tooltip=['Datum', 'Spelare', 'Resultat']).properties(height=300)
             st.altair_chart(chart, use_container_width=True)
 
-            # 3. SECTOR ANALYSIS (Hål för Hål)
             st.markdown("---")
             st.subheader("🧩 Sector Analysis (Hål)")
-            
             try:
                 dff['Hål_Int'] = pd.to_numeric(dff['Hål'], errors='coerce')
                 hole_stats = dff.groupby(['Hål_Int', 'Spelare'])['Resultat'].mean().reset_index()
-                
-                h_chart = alt.Chart(hole_stats).mark_bar().encode(
-                    x=alt.X('Hål_Int:O', title='Hål'),
-                    y=alt.Y('Resultat', title='Snitt'),
-                    color='Spelare',
-                    xOffset='Spelare',
-                    tooltip=['Hål_Int', 'Spelare', 'Resultat']
-                )
+                h_chart = alt.Chart(hole_stats).mark_bar().encode(x=alt.X('Hål_Int:O', title='Hål'), y=alt.Y('Resultat', title='Snitt'), color='Spelare', xOffset='Spelare', tooltip=['Hål_Int', 'Spelare', 'Resultat'])
                 st.altair_chart(h_chart, use_container_width=True)
             except: st.warning("Kunde inte visualisera hål-data.")
 
-            # 4. TYRE STRATEGY (Disc Stats)
             st.markdown("---")
             st.subheader("🛞 Tyre Strategy (Disc Performance)")
-            
             disc_stats = dff[~dff["Disc_Used"].isin(["Unknown", "Välj Disc", "None", None])]
-            
             if not disc_stats.empty:
                 ds = disc_stats.groupby("Disc_Used")["Resultat"].agg(['mean', 'count']).reset_index()
                 ds = ds[ds['count'] > 1].sort_values('mean')
-                
-                d_chart = alt.Chart(ds.head(10)).mark_bar().encode(
-                    x=alt.X('Disc_Used', sort='-y', title='Disc'),
-                    y=alt.Y('mean', title='Snittscore'),
-                    color=alt.Color('mean', scale=alt.Scale(scheme='redyellowgreen', reverse=True)),
-                    tooltip=['Disc_Used', 'mean', 'count']
-                )
+                d_chart = alt.Chart(ds.head(10)).mark_bar().encode(x=alt.X('Disc_Used', sort='-y', title='Disc'), y=alt.Y('mean', title='Snittscore'), color=alt.Color('mean', scale=alt.Scale(scheme='redyellowgreen', reverse=True)), tooltip=['Disc_Used', 'mean', 'count'])
                 st.altair_chart(d_chart, use_container_width=True)
             else: st.info("Ingen disc-data tillgänglig än.")
-
         else: st.info("Ingen data för valt filter.")
     else: st.info("Databasen är tom. Gå till Race-fliken och kör!")
 
