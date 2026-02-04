@@ -41,8 +41,18 @@ def load_data_from_sheet():
             
         inv_data = ws_inv.get_all_records()
         df_inv = pd.DataFrame(inv_data)
-        if df_inv.empty: df_inv = pd.DataFrame(columns=["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
         
+        # Säkra kolumner och datatyper (FIXEN ÄR HÄR)
+        expected_inv = ["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"]
+        if df_inv.empty: 
+            df_inv = pd.DataFrame(columns=expected_inv)
+        else:
+            # Tvinga siffror att vara siffror
+            numeric_cols = ["Speed", "Glide", "Turn", "Fade"]
+            for col in numeric_cols:
+                # Konvertera till numeric, sätt felaktiga värden till NaN, fyll sedan med 0
+                df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0)
+
         # --- HISTORY ---
         try: ws_hist = sheet.worksheet("History")
         except:
@@ -51,7 +61,8 @@ def load_data_from_sheet():
             
         hist_data = ws_hist.get_all_records()
         df_hist = pd.DataFrame(hist_data)
-        if df_hist.empty: df_hist = pd.DataFrame(columns=["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
+        expected_hist = ["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"]
+        if df_hist.empty: df_hist = pd.DataFrame(columns=expected_hist)
         
         return df_inv, df_hist
 
@@ -119,25 +130,32 @@ def suggest_disc(bag, player, dist, shape, form=1.0):
     eff_dist = dist / max(form, 0.5)
     target_speed = eff_dist / 10.0
     candidates = pb.copy()
-    candidates["Score"] = abs(candidates["Speed"] - target_speed)
+    
+    # Säkra att vi har siffror för beräkningen (Redundant men säkert)
+    candidates["Speed"] = pd.to_numeric(candidates["Speed"], errors='coerce').fillna(0)
+    candidates["Turn"] = pd.to_numeric(candidates["Turn"], errors='coerce').fillna(0)
+    candidates["Fade"] = pd.to_numeric(candidates["Fade"], errors='coerce').fillna(0)
+    
+    candidates["Speed_Diff"] = abs(candidates["Speed"] - target_speed)
     
     if eff_dist < 40: candidates = candidates[candidates["Typ"]=="Putter"]
     elif eff_dist < 80: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
     
     if candidates.empty: candidates = pb
     
-    if form < 0.9: candidates["Score"] += (candidates["Turn"] * 0.5)
+    if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Turn"] * 0.5)
+    else: candidates["Score"] = candidates["Speed_Diff"]
     
-    if shape == "Höger": best = candidates.sort_values("Fade", ascending=False).iloc[0]; reason="Forehand"
-    elif shape == "Vänster": best = candidates.sort_values("Fade", ascending=False).iloc[0]; reason="Hyzer"
-    else: best = candidates.sort_values("Turn", ascending=True).iloc[0]; reason="Rakt"
+    if shape == "Höger": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Forehand"
+    elif shape == "Vänster": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Hyzer"
+    else: best = candidates.sort_values(by=["Score", "Turn"], ascending=[True, True]).iloc[0]; reason="Rakt"
         
     return best, reason
 
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v28.1 Crash Proof")
+    st.caption("🟢 v28.2 Type Safe")
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -186,22 +204,18 @@ with t2:
         st.caption(inf.get('shape', 'Rak'))
 
     with col_s:
-        # --- KRASCH-SKYDD: INITIERING ---
         if hole not in st.session_state.current_scores: 
             st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: 
             st.session_state.selected_discs[hole] = {}
             
-        # Se till att alla aktiva spelare finns i listan för detta hål
         for p in st.session_state.active_players:
             if p not in st.session_state.current_scores[hole]:
-                st.session_state.current_scores[hole][p] = inf['p'] # Default Par
+                st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]:
                 st.session_state.selected_discs[hole][p] = None
 
-        # --- SCOREKORT ---
         for p in st.session_state.active_players:
-            # Nu är vi säkra på att p finns i current_scores[hole]
             with st.expander(f"{p} - {st.session_state.current_scores[hole][p]}", expanded=True):
                 curr_form = st.session_state.daily_forms.get(p, 1.0)
                 rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form)
