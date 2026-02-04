@@ -15,7 +15,7 @@ import requests
 from geopy.distance import geodesic
 import random
 import tempfile
-import cv2 # Kräver opencv-python-headless i requirements.txt
+import cv2 
 
 # Try import scipy
 try:
@@ -148,7 +148,6 @@ def analyze_image(image_bytes):
     except: return None
 
 def analyze_video_form(video_bytes):
-    # Extrahera frames från video
     try:
         tfile = tempfile.NamedTemporaryFile(delete=False) 
         tfile.write(video_bytes)
@@ -156,25 +155,22 @@ def analyze_video_form(video_bytes):
         frames = []
         count = 0
         success = True
-        while success and count < 30: # Ta max 30 frames
+        while success and count < 30: 
             success, image = vidcap.read()
-            if success and count % 5 == 0: # Ta var 5:e frame
+            if success and count % 5 == 0:
                 _, buffer = cv2.imencode('.jpg', image)
                 frames.append(base64.b64encode(buffer).decode('utf-8'))
             count += 1
         
-        # Skicka 3 nyckelframes till AI (Start, Middle, End)
         if len(frames) >= 3:
             key_frames = [frames[0], frames[len(frames)//2], frames[-1]]
             client = OpenAI(api_key=st.secrets["openai_key"])
-            content = [{"type": "text", "text": "Analysera denna discgolf-kast teknik (Backhand/Forehand). Ge 3 konkreta tips för bättre form och längd. Fokusera på: Reach back, Power pocket och Follow through."}]
-            for f in key_frames:
-                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{f}"}})
-            
+            content = [{"type": "text", "text": "Analysera denna discgolf-kast teknik. Ge 3 tips. Fokus: Reach back, Power pocket, Follow through."}]
+            for f in key_frames: content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{f}"}})
             res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": content}], max_tokens=500)
             return res.choices[0].message.content
         return "Kunde inte läsa videon."
-    except Exception as e: return f"Video Error: {e}. (Kräver opencv-python-headless i requirements)"
+    except Exception as e: return f"Video Error: {e}"
 
 def get_tactical_advice(player, bag_df, dist, weather, situation, obstacles, image_bytes=None):
     bag_str = ", ".join([f"{r['Modell']} ({r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in bag_df.iterrows()])
@@ -290,7 +286,7 @@ if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v47.0 Academy Upgrade")
+    st.caption("🟢 v48.0 Data & Video Telemetry")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -547,7 +543,7 @@ with t4:
                 save_to_sheet(st.session_state.inventory, "Inventory")
                 st.success(f"{mn} sparad!"); st.session_state.ai_disc_data = None; st.rerun()
 
-# TAB 5: TELEMETRY (MULTI-PLAYER)
+# TAB 5: TELEMETRY
 with t5:
     st.header("📈 SCUDERIA TELEMETRY")
     st1, st2, st3 = st.tabs(["✈️ Aero Lab", "🏎️ Race Performance", "🧩 Sector Analysis"])
@@ -583,10 +579,8 @@ with t5:
     with st2:
         if not df.empty:
             c1, c2 = st.columns(2)
-            # MULTI-PLAYER ENABLED
             sel_p_stats = c1.multiselect("Förare (Jämför)", df["Spelare"].unique(), default=df["Spelare"].unique())
             sel_c_stats = c2.selectbox("Grand Prix", df["Bana"].unique())
-            
             dff = df[(df["Spelare"].isin(sel_p_stats)) & (df["Bana"]==sel_c_stats)]
             if not dff.empty:
                 st.markdown("**Race Pace Trend**")
@@ -601,23 +595,36 @@ with t5:
     with st3:
         if not df.empty:
             sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
-            # MULTI-PLAYER ENABLED
             sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=df["Spelare"].unique())
-            
             hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"].isin(sel_p_sec))]
+            
             if not hdf.empty:
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
-                hole_summary = hdf.groupby(["Hål_Int", "Spelare"])["Resultat"].mean().reset_index()
                 
-                # Grouped Bar Chart for Comparison
-                c = alt.Chart(hole_summary).mark_bar().encode(
-                    x=alt.X('Spelare:N', axis=None), # Hide axis labels for cleaner look within groups
-                    y=alt.Y('Resultat', title='Snittscore'),
-                    color='Spelare',
-                    column=alt.Column('Hål_Int:O', title="Hål"), # Facet by hole
-                    tooltip=['Spelare', 'Hål_Int', 'Resultat']
-                ).interactive()
-                st.altair_chart(c, use_container_width=True)
+                # Sektor Analys 2.0 (Dual Stats)
+                hole_summary = hdf.groupby(["Hål_Int", "Spelare"])["Resultat"].agg(['mean', 'min']).reset_index()
+                hole_summary.columns = ['Hål', 'Spelare', 'Snitt', 'Bästa']
+                
+                # Tabellvy
+                with st.expander("📊 Sektor-Data (Tabell)", expanded=True):
+                    st.dataframe(hole_summary, hide_index=True)
+
+                # Graf: Kombinerad Stapel (Snitt) + Prick (Bästa)
+                base = alt.Chart(hole_summary).encode(x=alt.X('Hål:O', title="Hål"))
+                
+                bar = base.mark_bar(opacity=0.7).encode(
+                    y=alt.Y('Snitt', title='Score'),
+                    color=alt.Color('Spelare'),
+                    xOffset='Spelare',
+                    tooltip=['Spelare', 'Hål', 'Snitt', 'Bästa']
+                )
+                
+                point = base.mark_point(color='white', size=50, shape='diamond', filled=True).encode(
+                    y='Bästa',
+                    xOffset='Spelare'
+                )
+                
+                st.altair_chart((bar + point).interactive(), use_container_width=True)
             else: st.info("Ingen data.")
 
 # TAB 6: ADMIN
@@ -641,12 +648,10 @@ with t6:
                 st.success(f"Importerade {len(nd)} rader!")
         except Exception as e: st.error(f"Fel: {e}")
 
-# TAB 7: ACADEMY (NEW)
+# TAB 7: ACADEMY
 with t7:
     st.header("🎓 SCUDERIA ACADEMY")
-    
-    st1, st2 = st.tabs(["🎯 Putt-Coach", "📹 Video Scout (Beta)"])
-    
+    st1, st2 = st.tabs(["🎯 Putt-Coach", "📹 Video Scout"])
     with st1:
         c1, c2 = st.columns([1, 2])
         with c1:
@@ -681,12 +686,10 @@ with t7:
                 if st.button("🏁 Avsluta & Spara Pass"):
                     st.balloons(); st.success("Bra jobbat! Vila armen."); st.session_state.putt_session = []; st.rerun()
             else: st.info("Starta ett pass till vänster.")
-
     with st2:
         st.subheader("📹 Video Form Check")
-        st.caption("Ladda upp en video på ditt kast. AI:n analyserar din teknik. (Kräver videostöd i servern)")
-        
-        vid_file = st.file_uploader("Ladda upp video (max 20MB)", type=['mp4', 'mov'])
+        st.info("På mobil: Klicka 'Browse files' -> Välj 'Ta Video' eller 'Kamera' för att spela in direkt.")
+        vid_file = st.file_uploader("📹 Spela in / Ladda upp Video", type=['mp4', 'mov'])
         if vid_file:
             st.video(vid_file)
             if st.button("🧠 Analysera Teknik"):
