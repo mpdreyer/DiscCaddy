@@ -89,10 +89,7 @@ def save_to_sheet(df, worksheet_name):
         sheet = client.open("DiscCaddy_DB")
         try: ws = sheet.worksheet(worksheet_name)
         except: ws = sheet.add_worksheet(worksheet_name, 100, 10)
-        # SÄKERHET: Rensa inte om dataframe är helt tom (förutom headers) om det verkar fel
-        if df.empty and worksheet_name == "Inventory":
-             # Om vi försöker spara en tom inventory, varna hellre än radera allt
-             pass 
+        if df.empty and worksheet_name == "Inventory": pass 
         ws.clear(); ws.update([df.columns.values.tolist()] + df.values.tolist())
     except Exception as e: st.error(f"Save Error: {e}")
 
@@ -176,48 +173,45 @@ def analyze_video_form(video_bytes):
         return "Kunde inte läsa videon."
     except Exception as e: return f"Video Error: {e}"
 
-def get_tactical_advice(player, bag_df, dist, weather, situation, obstacles, image_bytes=None):
-    bag_str = ", ".join([f"{r['Modell']} ({r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in bag_df.iterrows()])
+# --- THE SMART AI CADDY CORE ---
+def get_ai_caddy_advice(player, bag_df, hole_info, weather, situation, obstacles, form_factor=1.0):
+    # Filtrera bagen till "Race Lineup" om möjligt
+    race_bag = bag_df[bag_df["Status"] == "Bag"]
+    if race_bag.empty: race_bag = bag_df # Fallback till hyllan om bagen är tom
+    
+    bag_str = ", ".join([f"{r['Modell']} ({r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in race_bag.iterrows()])
     obs_str = ', '.join(obstacles)
-    prompt = f"Caddy-råd: Spelare {player}, Bag: {bag_str}. Läge: {situation} ({dist}m till korg). Hinder: {obs_str}. Vind: {weather['wind']}m/s. Prioritera precision. Svara kort: Disc, Linje, Tanke."
-    msgs = [{"role": "system", "content": "Elit-caddy."}]
-    if image_bytes:
-        b64 = base64.b64encode(image_bytes).decode('utf-8')
-        content = [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]
-    else: content = prompt
-    msgs.append({"role": "user", "content": content})
+    
+    prompt = f"""
+    Du är en Elit-Discgolf Caddy (Scuderia Wonka). Ge ett EXAKT råd.
+    
+    SPELARE: {player} (Dagsform Power: {int(form_factor*100)}%)
+    HÅL: {hole_info['l']}m, Par {hole_info['p']}, Form: {hole_info['shape']}
+    LÄGE: {situation}
+    HINDER: {obs_str}
+    VÄDER: {weather['wind']} m/s, {weather['temp']}C.
+    TILLGÄNGLIGA DISCAR (I BAGEN): {bag_str}
+    
+    UPPGIFT:
+    1. Välj den ABSOLUT BÄSTA discen ur listan ovan.
+    2. Rekommendera kasttyp (BH/FH) och linje (Hyzer/Flat/Anhyzer).
+    3. Motivera kort.
+    
+    Format:
+    **Val:** [Disc Namn]
+    **Plan:** [Kasttyp] [Linje]
+    **Caddy:** [Kort motivering]
+    """
+    
+    msgs = [{"role": "system", "content": "Du är en professionell discgolf-caddy. Var bestämd."}]
+    msgs.append({"role": "user", "content": prompt})
     return ask_ai(msgs)
-
-def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_type="Stilla"):
-    pb = bag[(bag["Owner"]==player) & (bag["Status"]=="Bag")]
-    if pb.empty: return None, "Tom väska"
-    eff_dist = dist / max(form, 0.5); target_speed = eff_dist / 10.0
-    pb = pb.copy()
-    for c in ["Speed", "Turn", "Fade"]: pb[c] = pd.to_numeric(pb[c], errors='coerce').fillna(0)
-    
-    if "Motvind" in wind_type: pb["Eff_Turn"] = pb["Turn"] - (wind_str * 0.4); advice_suffix = " (Motvind)"
-    elif "Medvind" in wind_type: pb["Eff_Turn"] = pb["Turn"] + (wind_str * 0.3); advice_suffix = " (Medvind)"
-    else: pb["Eff_Turn"] = pb["Turn"]; advice_suffix = ""
-
-    pb["Speed_Diff"] = abs(pb["Speed"] - target_speed)
-    candidates = pb.copy()
-    if eff_dist < 45: candidates = candidates[candidates["Typ"]=="Putter"]
-    elif eff_dist < 85: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
-    elif eff_dist < 110: candidates = candidates[candidates["Typ"].isin(["Midrange", "Fairway Driver"])]
-    if candidates.empty: candidates = pb
-    
-    if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Eff_Turn"] * 0.5)
-    else: candidates["Score"] = candidates["Speed_Diff"]
-    
-    if shape == "Höger": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Forehand" + advice_suffix
-    elif shape == "Vänster": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Hyzer" + advice_suffix
-    else: best = candidates.sort_values(by=["Score", "Eff_Turn"], ascending=[True, True]).iloc[0]; reason="Rakt" + advice_suffix
-    return best, reason
 
 def generate_smart_bag(inventory, player, course_name):
     holes = st.session_state.courses[course_name]["holes"]
     lengths = [h["l"] for h in holes.values()]
     max_len = max(lengths)
+    
     all_discs = inventory[inventory["Owner"] == player].copy()
     for col in ["Speed", "Glide", "Turn", "Fade"]: all_discs[col] = pd.to_numeric(all_discs[col], errors='coerce').fillna(0)
     all_discs["Stability"] = all_discs["Turn"] + all_discs["Fade"]
@@ -229,15 +223,23 @@ def generate_smart_bag(inventory, player, course_name):
         sorted_df = df.sort_values(sort_col, ascending=asc)
         for i in range(min(count, len(sorted_df))): pack_indices.append(sorted_df.iloc[i].name)
 
-    putters = all_discs[all_discs["Typ"] == "Putter"]; add_best_of(putters, 2, "Speed", True) 
+    # 1. Putters
+    putters = all_discs[all_discs["Typ"] == "Putter"]
+    add_best_of(putters, 2, "Speed", True) 
+    
+    # 2. Mids
     mids = all_discs[all_discs["Typ"] == "Midrange"]
     if not mids.empty:
         pack_indices.append(mids.sort_values("Stability", ascending=False).iloc[0].name)
         pack_indices.append(mids.sort_values("Stability", ascending=True).iloc[0].name)
+        
+    # 3. Fairways
     fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
     if not fairways.empty:
         pack_indices.append(fairways.sort_values("Stability", ascending=False).iloc[0].name)
         pack_indices.append(fairways.sort_values("Stability", ascending=True).iloc[0].name)
+        
+    # 4. Drivers
     if max_len > 90:
         drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
         if not drivers.empty:
@@ -290,7 +292,7 @@ if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v49.0 Safety Car Update")
+    st.caption("🟢 v50.0 The AI Ecosystem")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -328,38 +330,37 @@ with st.sidebar:
         hole_wind = st.radio("Vind på tee:", ["Stilla", "Mot", "Med", "Sida"], horizontal=True)
 
     st.divider()
-    
-    # 2. SPELARE (Updated for Robustness)
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
     new_p = st.text_input("Ny spelare / Återställ:", placeholder="Namn")
     if st.button("Lägg till") and new_p:
-        # Create start kit row
         start_kit = [{"Owner": new_p, "Modell": "Start Putter", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Status": "Bag"}]
-        # Append safe
         st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
-        # Force save
         save_to_sheet(st.session_state.inventory, "Inventory")
-        # Clear cache to force reload next time
-        st.cache_resource.clear()
-        st.success("Spelare skapad/återställd!"); st.rerun()
+        st.cache_resource.clear(); st.success("Klar!"); st.rerun()
 
     active = st.multiselect("Spelare", all_owners, default=st.session_state.active_players)
     if active != st.session_state.active_players:
         st.session_state.active_players = active
         st.rerun()
-        
     if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
 t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 TELEMETRY", "⚙️ ADMIN", "🎓 ACADEMY"])
 
-# TAB 1: WARM-UP
+# TAB 1: WARM-UP (Smart Filtered)
 with t1:
     st.header("🔥 Driving Range")
     if st.session_state.active_players:
         curr_p = st.selectbox("Kalibrera:", st.session_state.active_players)
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
-        disc_options = ["Välj Disc"] + p_inv["Modell"].unique().tolist()
+        
+        # SMART FILTER: Prioritera Bagen
+        bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
+        shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
+        
+        # Sätt Lineup överst
+        disc_options = ["Välj Disc"] + bag_discs + ["--- HYLLAN ---"] + shelf_discs
+        
         c_in, c_list = st.columns([1, 1])
         with c_in:
             with st.container(border=True):
@@ -370,7 +371,7 @@ with t1:
                 kast_len = c_d.number_input("Längd (m)", 0, 200, 50, step=5)
                 kast_sida = c_s.number_input("Sida (m)", -50, 50, 0, step=1, help="-Vä / +Hö")
                 if st.button("➕ Spara Kast", type="primary"):
-                    if sel_disc_name != "Välj Disc" and kast_len > 0:
+                    if sel_disc_name != "Välj Disc" and "---" not in sel_disc_name and kast_len > 0:
                         d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
                         st.session_state.warmup_shots.append({"disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"]), "turn": float(d_data["Turn"]), "fade": float(d_data["Fade"])})
                         st.success("Sparat!")
@@ -381,15 +382,14 @@ with t1:
         if st.session_state.warmup_shots:
             st.divider()
             shots = st.session_state.warmup_shots
-            tot_pot = 0; tot_tech = 0
+            tot_pot = 0
             for s in shots:
                 opt_dist = max(s["speed"] * 10.0, 40.0); tot_pot += (s["len"] / opt_dist)
-                nat_side = 0 
-                tot_tech += (s["side"] - nat_side)
             avg_form = tot_pot / len(shots)
             st.session_state.daily_forms[curr_p] = avg_form
+            
             c1, c2 = st.columns(2)
-            c1.metric("Potential", f"{int(avg_form*100)}%")
+            c1.metric("Dagsform (Power)", f"{int(avg_form*100)}%")
             fig, ax = plt.subplots(figsize=(4,3))
             x=[s["side"] for s in shots]; y=[s["len"] for s in shots]
             c=['#fff200' if "Backhand" in s["style"] else '#ffffff' for s in shots]
@@ -401,7 +401,7 @@ with t1:
             c2.pyplot(fig)
     else: st.info("Välj spelare.")
 
-# TAB 2: RACE
+# TAB 2: RACE (AI CORE)
 with t2:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
@@ -417,41 +417,43 @@ with t2:
         for p in st.session_state.active_players:
             if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
+
         for p in st.session_state.active_players:
             with st.expander(f"🏎️ {p} (Score: {st.session_state.current_scores[hole][p]})", expanded=True):
                 with st.container(border=True):
-                    st.markdown(f"**Taktik {p}**")
+                    # AUTOMATIC AI CADDY
+                    form = st.session_state.daily_forms.get(p, 1.0)
+                    
                     c_sit, c_obs = st.columns([1, 1])
                     situation = c_sit.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", horizontal=True)
                     dist_left = c_sit.slider("Avstånd (m)", 0, 200, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
                     base_obs = ["Träd Vänster", "Träd Höger", "Smal Korridor", "Port/Gap", "Lågt Tak", "Vatten", "Uppför", "Nedför"]
                     obstacles = c_obs.multiselect("Hinder", base_obs, key=f"obs_{hole}_{p}")
-                    gap_info = ""
-                    if "Port/Gap" in obstacles:
-                        cg1, cg2 = st.columns(2)
-                        g_dist = cg1.number_input("Avstånd Port", 0, 150, 30, key=f"gd_{hole}_{p}")
-                        g_width = cg2.number_input("Bredd Port", 1, 20, 3, key=f"gw_{hole}_{p}")
-                        gap_info = f" | Måste träffa {g_width}m lucka {g_dist}m bort."
-                    use_cam = st.checkbox("📸 Fota", key=f"cam_tog_{hole}_{p}")
-                    img_data = None
-                    if use_cam:
-                        img_file = st.camera_input("Fota", key=f"ci_{hole}_{p}")
-                        if img_file: img_data = img_file.getvalue()
-                    if st.button(f"🧠 Team Radio ({p})", key=f"ai_btn_{hole}_{p}"):
-                        p_bag = st.session_state.inventory[(st.session_state.inventory["Owner"]==p) & (st.session_state.inventory["Status"]=="Bag")]
-                        final_obs = obstacles.copy()
-                        if gap_info: final_obs.append(gap_info)
-                        with st.spinner("Beräknar..."):
-                            advice = get_tactical_advice(p, p_bag, dist_left, st.session_state.weather_data, situation, final_obs, img_data)
+                    
+                    # AI BUTTON
+                    if st.button(f"🧠 AI-Caddy Analys ({p})", key=f"ai_btn_{hole}_{p}"):
+                        p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
+                        with st.spinner("Beräknar optimal linje..."):
+                            advice = get_ai_caddy_advice(p, p_bag, inf, st.session_state.weather_data, situation, obstacles, form)
                             st.session_state.hole_advice[f"{hole}_{p}"] = advice
-                    if f"{hole}_{p}" in st.session_state.hole_advice: st.info(st.session_state.hole_advice[f"{hole}_{p}"])
+                    
+                    if f"{hole}_{p}" in st.session_state.hole_advice: 
+                        st.info(st.session_state.hole_advice[f"{hole}_{p}"])
+
                 c1, c2, c3 = st.columns([1,2,1])
                 if c1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
                 c2.markdown(f"<h2 style='text-align:center'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
                 if c3.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
-                p_bag = st.session_state.inventory[(st.session_state.inventory["Owner"]==p) & (st.session_state.inventory["Status"]=="Bag")]
-                opts = ["Välj Disc"] + p_bag["Modell"].tolist()
+                
+                # BAG FILTERED DISC SELECTOR
+                p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
+                bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
+                all_discs = p_inv["Modell"].tolist()
+                
+                # Smart Selection: If bag is set, show only bag. Else show all.
+                opts = ["Välj Disc"] + (bag_discs if bag_discs else all_discs)
                 st.session_state.selected_discs[hole][p] = st.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
+
     if st.button("🏁 SPARA RUNDA", type="primary"):
         new_rows = []
         d = datetime.now().strftime("%Y-%m-%d")
@@ -616,35 +618,19 @@ with t5:
         if not df.empty:
             sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
             sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=df["Spelare"].unique())
-            
             hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"].isin(sel_p_sec))]
             
             if not hdf.empty:
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
-                
-                # Sektor Analys 2.0 (Dual Stats)
                 hole_summary = hdf.groupby(["Hål_Int", "Spelare"])["Resultat"].agg(['mean', 'min']).reset_index()
                 hole_summary.columns = ['Hål', 'Spelare', 'Snitt', 'Bästa']
                 
-                # Tabellvy
                 with st.expander("📊 Sektor-Data (Tabell)", expanded=True):
                     st.dataframe(hole_summary, hide_index=True)
 
-                # Graf: Kombinerad Stapel (Snitt) + Prick (Bästa)
                 base = alt.Chart(hole_summary).encode(x=alt.X('Hål:O', title="Hål"))
-                
-                bar = base.mark_bar(opacity=0.7).encode(
-                    y=alt.Y('Snitt', title='Score'),
-                    color=alt.Color('Spelare'),
-                    xOffset='Spelare',
-                    tooltip=['Spelare', 'Hål', 'Snitt', 'Bästa']
-                )
-                
-                point = base.mark_point(color='white', size=50, shape='diamond', filled=True).encode(
-                    y='Bästa',
-                    xOffset='Spelare'
-                )
-                
+                bar = base.mark_bar(opacity=0.7).encode(y=alt.Y('Snitt', title='Score'), color=alt.Color('Spelare'), xOffset='Spelare', tooltip=['Spelare', 'Hål', 'Snitt', 'Bästa'])
+                point = base.mark_point(color='white', size=50, shape='diamond', filled=True).encode(y='Bästa', xOffset='Spelare')
                 st.altair_chart((bar + point).interactive(), use_container_width=True)
             else: st.info("Ingen data.")
 
