@@ -14,7 +14,8 @@ import matplotlib.pyplot as plt
 import requests
 from geopy.distance import geodesic
 import random
-# Try import scipy, handle if missing during reboot
+
+# Try import scipy for smooth curves
 try:
     from scipy.interpolate import make_interp_spline
 except ImportError:
@@ -258,7 +259,7 @@ if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v46.1 Telemetry Fix")
+    st.caption("🟢 v46.2 Syntax Fix")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -336,7 +337,7 @@ with t1:
             tot_pot = 0; tot_tech = 0
             for s in shots:
                 opt_dist = max(s["speed"] * 10.0, 40.0); tot_pot += (s["len"] / opt_dist)
-                nat_side = 0 # Simplified calc for display
+                nat_side = 0 
                 tot_tech += (s["side"] - nat_side)
             avg_form = tot_pot / len(shots)
             st.session_state.daily_forms[curr_p] = avg_form
@@ -391,7 +392,8 @@ with t2:
                         if img_file: img_data = img_file.getvalue()
                     if st.button(f"🧠 Team Radio ({p})", key=f"ai_btn_{hole}_{p}"):
                         p_bag = st.session_state.inventory[(st.session_state.inventory["Owner"]==p) & (st.session_state.inventory["Status"]=="Bag")]
-                        final_obs = obstacles.copy(); if gap_info: final_obs.append(gap_info)
+                        final_obs = obstacles.copy()
+                        if gap_info: final_obs.append(gap_info)
                         with st.spinner("Beräknar..."):
                             advice = get_tactical_advice(p, p_bag, dist_left, st.session_state.weather_data, situation, final_obs, img_data)
                             st.session_state.hole_advice[f"{hole}_{p}"] = advice
@@ -453,18 +455,6 @@ with t4:
                 st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
                 save_to_sheet(st.session_state.inventory, "Inventory"); st.session_state.suggested_pack = []; st.success("Packat!"); st.rerun()
     if owner:
-        st.markdown("---")
-        # FLIGHT CHART (Telemetri)
-        st.subheader("✈️ Aero Dynamics (Flight Telemetry)")
-        my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner].copy()
-        if not my_inv.empty:
-            chart = alt.Chart(my_inv).mark_circle(size=150).encode(
-                x=alt.X('Turn', scale=alt.Scale(domain=[-5, 2])),
-                y=alt.Y('Fade', scale=alt.Scale(domain=[0, 6])),
-                color=alt.Color('Typ'),
-                tooltip=['Modell', 'Speed', 'Glide', 'Turn', 'Fade']
-            ).properties(height=300).interactive()
-            st.altair_chart(chart, use_container_width=True)
         st.markdown("---")
         sort_mode = st.radio("Sortera på:", ["Speed", "Modell", "Typ"], horizontal=True)
         my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
@@ -587,11 +577,10 @@ with t5:
             sel_p_sec = st.selectbox("Analysera Förare", df["Spelare"].unique(), key="sec_driver")
             hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"]==sel_p_sec)]
             if not hdf.empty:
-                # SAFE COLOR LOGIC (Data Prep instead of Altair Condition)
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
                 hole_summary = hdf.groupby("Hål_Int")["Resultat"].mean().reset_index()
                 
-                # Determine status in Python
+                # SAFE COLOR LOGIC (Data Prep)
                 def get_status(score):
                     if score < 3.0: return 'Birdie'
                     elif score > 3.0: return 'Bogey'
