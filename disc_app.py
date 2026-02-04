@@ -10,6 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from openai import OpenAI
 import base64
 import json
+import matplotlib.pyplot as plt
 
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
@@ -185,7 +186,7 @@ def generate_smart_bag(inventory, player, course_name):
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v30.0 The Cleaner")
+    st.caption("🟢 v31.0 The Driving Range")
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -209,14 +210,87 @@ with st.sidebar:
 
 t1, t2, t3, t4, t5, t6 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📊 STATS", "⚙️ ADMIN"])
 
-# TAB 1: WARM-UP
+# TAB 1: WARM-UP (THE DRIVING RANGE)
 with t1:
-    st.header("🔥 Kalibrering")
+    st.header("🔥 Driving Range & Kalibrering")
     if st.session_state.active_players:
-        p = st.selectbox("Formkoll:", st.session_state.active_players)
-        f_val = st.slider(f"Dagsform {p} (%)", 50, 150, 100, key=f"form_{p}")
-        st.session_state.daily_forms[p] = f_val / 100.0
-        st.metric("Effekt", f"{f_val}%")
+        curr_p = st.selectbox("Kalibrera:", st.session_state.active_players)
+        
+        # Referens
+        with st.expander("⚙️ Inställningar (Ditt Normala Max)", expanded=True):
+            ref_dist = st.number_input(f"Normal Maxlängd för {curr_p} (m)", 40, 150, 80, step=5, help="Används för att beräkna dagsform.")
+        
+        st.markdown("### 🏹 Mata in kast")
+        # Inmatning för 3 set
+        c1, c2, c3 = st.columns(3)
+        
+        throws_data = [] # [len, side]
+        
+        with c1:
+            st.markdown("**Set 1**")
+            l1 = st.number_input("K1 Längd", 0, 200, 0, key="s1k1l"); s1 = st.number_input("K1 Sida", -50, 50, 0, key="s1k1s", help="-Vänster / +Höger")
+            l2 = st.number_input("K2 Längd", 0, 200, 0, key="s1k2l"); s2 = st.number_input("K2 Sida", -50, 50, 0, key="s1k2s")
+            l3 = st.number_input("K3 Längd", 0, 200, 0, key="s1k3l"); s3 = st.number_input("K3 Sida", -50, 50, 0, key="s1k3s")
+            if l1>0: throws_data.append([l1, s1])
+            if l2>0: throws_data.append([l2, s2])
+            if l3>0: throws_data.append([l3, s3])
+
+        with c2:
+            st.markdown("**Set 2**")
+            l4 = st.number_input("K1 Längd", 0, 200, 0, key="s2k1l"); s4 = st.number_input("K1 Sida", -50, 50, 0, key="s2k1s")
+            l5 = st.number_input("K2 Längd", 0, 200, 0, key="s2k2l"); s5 = st.number_input("K2 Sida", -50, 50, 0, key="s2k2s")
+            l6 = st.number_input("K3 Längd", 0, 200, 0, key="s2k3l"); s6 = st.number_input("K3 Sida", -50, 50, 0, key="s2k3s")
+            if l4>0: throws_data.append([l4, s4])
+            if l5>0: throws_data.append([l5, s5])
+            if l6>0: throws_data.append([l6, s6])
+
+        with c3:
+            st.markdown("**Set 3**")
+            l7 = st.number_input("K1 Längd", 0, 200, 0, key="s3k1l"); s7 = st.number_input("K1 Sida", -50, 50, 0, key="s3k1s")
+            l8 = st.number_input("K2 Längd", 0, 200, 0, key="s3k2l"); s8 = st.number_input("K2 Sida", -50, 50, 0, key="s3k2s")
+            l9 = st.number_input("K3 Längd", 0, 200, 0, key="s3k3l"); s9 = st.number_input("K3 Sida", -50, 50, 0, key="s3k3s")
+            if l7>0: throws_data.append([l7, s7])
+            if l8>0: throws_data.append([l8, s8])
+            if l9>0: throws_data.append([l9, s9])
+
+        if st.button("📊 Analysera & Spara Form", type="primary"):
+            if throws_data:
+                avg_dist = sum([t[0] for t in throws_data]) / len(throws_data)
+                avg_side = sum([t[1] for t in throws_data]) / len(throws_data)
+                
+                # Beräkna Form
+                form_factor = avg_dist / ref_dist
+                st.session_state.daily_forms[curr_p] = form_factor
+                
+                # Visa Resultat
+                c_res, c_gr = st.columns(2)
+                with c_res:
+                    st.metric("Snittlängd", f"{int(avg_dist)}m")
+                    st.metric("Dagsform", f"{int(form_factor*100)}%")
+                    
+                    if avg_side < -5: st.warning("⚠️ Du drar VÄNSTER (Release Early?)")
+                    elif avg_side > 5: st.warning("⚠️ Du drar HÖGER (Grip Lock?)")
+                    else: st.success("✅ Rak och fin linje!")
+                    
+                    st.success(f"Caddyn är nu kalibrerad till {int(form_factor*100)}% kapacitet.")
+
+                with c_gr:
+                    # Scatter Plot
+                    fig, ax = plt.subplots(figsize=(4,4))
+                    x_vals = [t[1] for t in throws_data]
+                    y_vals = [t[0] for t in throws_data]
+                    
+                    ax.scatter(x_vals, y_vals, c='red', s=100, alpha=0.7)
+                    ax.axvline(0, color='gray', linestyle='--') # Mittenlinje
+                    ax.set_xlim(-30, 30)
+                    ax.set_ylim(0, max(y_vals)*1.2)
+                    ax.set_xlabel("Sida (m)")
+                    ax.set_ylabel("Längd (m)")
+                    ax.set_title("Träffbild")
+                    st.pyplot(fig)
+            else:
+                st.warning("Mata in minst ett kast.")
+
     else: st.info("Välj spelare i sidomenyn.")
 
 # TAB 2: RACE
