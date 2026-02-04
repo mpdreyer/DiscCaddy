@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import requests
 from geopy.distance import geodesic
 import random
+from scipy.interpolate import make_interp_spline # För mjuka kurvor
 
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
@@ -177,12 +178,10 @@ def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_type="Stil
     else: best = candidates.sort_values(by=["Score", "Eff_Turn"], ascending=[True, True]).iloc[0]; reason="Rakt" + advice_suffix
     return best, reason
 
-# --- SMART BAG GENERATOR 2.0 ---
 def generate_smart_bag(inventory, player, course_name):
     holes = st.session_state.courses[course_name]["holes"]
     lengths = [h["l"] for h in holes.values()]
     max_len = max(lengths)
-    
     all_discs = inventory[inventory["Owner"] == player].copy()
     for col in ["Speed", "Glide", "Turn", "Fade"]: all_discs[col] = pd.to_numeric(all_discs[col], errors='coerce').fillna(0)
     all_discs["Stability"] = all_discs["Turn"] + all_discs["Fade"]
@@ -192,26 +191,17 @@ def generate_smart_bag(inventory, player, course_name):
     def add_best_of(df, count=1, sort_col="Speed", asc=True):
         if df.empty: return
         sorted_df = df.sort_values(sort_col, ascending=asc)
-        for i in range(min(count, len(sorted_df))):
-            pack_indices.append(sorted_df.iloc[i].name)
+        for i in range(min(count, len(sorted_df))): pack_indices.append(sorted_df.iloc[i].name)
 
-    # 1. PUTTERS (Minst 2)
-    putters = all_discs[all_discs["Typ"] == "Putter"]
-    add_best_of(putters, 2, "Speed", True) 
-    
-    # 2. MIDRANGE (Minst 2: En Stabil, En Rak)
+    putters = all_discs[all_discs["Typ"] == "Putter"]; add_best_of(putters, 2, "Speed", True) 
     mids = all_discs[all_discs["Typ"] == "Midrange"]
     if not mids.empty:
         pack_indices.append(mids.sort_values("Stability", ascending=False).iloc[0].name)
         pack_indices.append(mids.sort_values("Stability", ascending=True).iloc[0].name)
-        
-    # 3. FAIRWAY (Minst 2)
     fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
     if not fairways.empty:
         pack_indices.append(fairways.sort_values("Stability", ascending=False).iloc[0].name)
         pack_indices.append(fairways.sort_values("Stability", ascending=True).iloc[0].name)
-        
-    # 4. DISTANCE DRIVERS (Om banan kräver det)
     if max_len > 90:
         drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
         if not drivers.empty:
@@ -219,6 +209,49 @@ def generate_smart_bag(inventory, player, course_name):
             pack_indices.append(drivers.sort_values("Fade", ascending=False).iloc[0].name)
 
     return list(set(pack_indices))
+
+# --- FLIGHT SIMULATION LOGIC ---
+def simulate_flight(speed, glide, turn, fade, power_factor=1.0):
+    # Enkel fysiksimulering för plot
+    # Power factor: 1.0 = optimal. <1 = low power (mer fade). >1 = high power (mer turn).
+    
+    # Justera värden baserat på kraft
+    eff_turn = turn - (power_factor - 1.0) * 2  # Mer kraft = mer turn (mer negativt)
+    eff_fade = fade + (1.0 - power_factor) * 2  # Mindre kraft = mer fade (mer positivt)
+    
+    # Punkter för kurvan (X=Sida, Y=Längd)
+    # Start
+    x = [0]
+    y = [0]
+    
+    # High Speed Turn Phase (Första 60-70% av flykten)
+    # Discen går rakt eller höger (för RHBH)
+    dist_turn = speed * 10 * power_factor * 0.7
+    side_turn = eff_turn * 3 * power_factor # Skala upp för visualisering
+    
+    x.append(side_turn)
+    y.append(dist_turn)
+    
+    # Low Speed Fade Phase (Sista delen)
+    # Discen dumpar vänster
+    dist_total = speed * 10 * power_factor
+    side_fade = side_turn - (eff_fade * 4) # Fade drar tillbaka åt vänster
+    
+    x.append(side_fade)
+    y.append(dist_total)
+    
+    # Skapa mjuka kurvor
+    x = np.array(x)
+    y = np.array(y)
+    
+    # Interpolering för snygg graf
+    try:
+        X_Y_Spline = make_interp_spline(y, x)
+        Y_smooth = np.linspace(y.min(), y.max(), 50)
+        X_smooth = X_Y_Spline(Y_smooth)
+        return X_smooth, Y_smooth
+    except:
+        return x, y
 
 # --- STATE INIT ---
 if 'data_loaded' not in st.session_state:
@@ -246,7 +279,7 @@ if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v45.0 Telemetry Center")
+    st.caption("🟢 v46.0 Aero-Sim")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -379,23 +412,19 @@ with t2:
                     c_sit, c_obs = st.columns([1, 1])
                     situation = c_sit.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", horizontal=True)
                     dist_left = c_sit.slider("Avstånd (m)", 0, 200, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
-                    
                     base_obs = ["Träd Vänster", "Träd Höger", "Smal Korridor", "Port/Gap", "Lågt Tak", "Vatten", "Uppför", "Nedför"]
                     obstacles = c_obs.multiselect("Hinder", base_obs, key=f"obs_{hole}_{p}")
-                    
                     gap_info = ""
                     if "Port/Gap" in obstacles:
                         cg1, cg2 = st.columns(2)
                         g_dist = cg1.number_input("Avstånd Port", 0, 150, 30, key=f"gd_{hole}_{p}")
                         g_width = cg2.number_input("Bredd Port", 1, 20, 3, key=f"gw_{hole}_{p}")
                         gap_info = f" | Måste träffa {g_width}m lucka {g_dist}m bort."
-
                     use_cam = st.checkbox("📸 Fota", key=f"cam_tog_{hole}_{p}")
                     img_data = None
                     if use_cam:
                         img_file = st.camera_input("Fota", key=f"ci_{hole}_{p}")
                         if img_file: img_data = img_file.getvalue()
-
                     if st.button(f"🧠 Team Radio ({p})", key=f"ai_btn_{hole}_{p}"):
                         p_bag = st.session_state.inventory[(st.session_state.inventory["Owner"]==p) & (st.session_state.inventory["Status"]=="Bag")]
                         final_obs = obstacles.copy()
@@ -403,14 +432,12 @@ with t2:
                         with st.spinner("Beräknar..."):
                             advice = get_tactical_advice(p, p_bag, dist_left, st.session_state.weather_data, situation, final_obs, img_data)
                             st.session_state.hole_advice[f"{hole}_{p}"] = advice
-                    
                     if f"{hole}_{p}" in st.session_state.hole_advice: st.info(st.session_state.hole_advice[f"{hole}_{p}"])
 
                 c1, c2, c3 = st.columns([1,2,1])
                 if c1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
                 c2.markdown(f"<h2 style='text-align:center'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
                 if c3.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
-                
                 p_bag = st.session_state.inventory[(st.session_state.inventory["Owner"]==p) & (st.session_state.inventory["Status"]=="Bag")]
                 opts = ["Välj Disc"] + p_bag["Modell"].tolist()
                 st.session_state.selected_discs[hole][p] = st.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
@@ -530,82 +557,113 @@ with t4:
                 save_to_sheet(st.session_state.inventory, "Inventory")
                 st.success(f"{mn} sparad!"); st.session_state.ai_disc_data = None; st.rerun()
 
-# TAB 5: TELEMETRY (NEW)
+# TAB 5: TELEMETRY (AERO SIM)
 with t5:
     st.header("📈 SCUDERIA TELEMETRY")
     
-    # 1. TABS FÖR UNDER-DATA
-    st1, st2, st3 = st.tabs(["🏎️ Race Trace (Trend)", "✈️ Aero Lab (Discs)", "🧩 Sector Analysis (Holes)"])
-    
+    st1, st2, st3 = st.tabs(["✈️ Aero Lab (Flight Sim)", "🏎️ Race Performance (Stats)", "🧩 Sector Analysis (Holes)"])
     df = st.session_state.history
     
+    # 1. AERO LAB (FLIGHT SIMULATOR)
     with st1:
-        if not df.empty:
-            sel_p = st.multiselect("Välj Förare", df["Spelare"].unique(), default=df["Spelare"].unique())
-            dff = df[df["Spelare"].isin(sel_p)]
-            
-            # KPI Cards
-            c1, c2, c3 = st.columns(3)
-            avg = dff["Resultat"].mean()
-            best = dff.groupby(["Datum", "Spelare"])["Resultat"].sum().min()
-            
-            c1.markdown(f"<div class='stat-card'><div class='stat-label'>Snitt (Hål)</div><div class='stat-value'>{avg:.2f}</div></div>", unsafe_allow_html=True)
-            c2.markdown(f"<div class='stat-card'><div class='stat-label'>Personbästa (Runda)</div><div class='stat-value'>{int(best) if not np.isnan(best) else '-'}</div></div>", unsafe_allow_html=True)
-            c3.markdown(f"<div class='stat-card'><div class='stat-label'>Antal Hål</div><div class='stat-value'>{len(dff)}</div></div>", unsafe_allow_html=True)
-            
-            st.divider()
-            
-            # Trend Chart
-            round_scores = dff.groupby(["Datum", "Spelare"])["Resultat"].mean().reset_index()
-            chart = alt.Chart(round_scores).mark_line(point=True).encode(
-                x='Datum:T', y=alt.Y('Resultat', scale=alt.Scale(zero=False)), color='Spelare', tooltip=['Datum', 'Spelare', 'Resultat']
-            ).interactive()
-            st.altair_chart(chart, use_container_width=True)
-        else: st.info("Ingen data än.")
-
-    with st2:
-        # AERO LAB (DISC CHART)
+        st.subheader("Aerodynamic Wind Tunnel")
+        
         if st.session_state.active_players:
             p = st.session_state.active_players[0]
             my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
             
-            st.subheader(f"Flight Chart: {p}")
-            if not my_inv.empty:
-                # Scatter Plot: Turn vs Fade
-                chart = alt.Chart(my_inv).mark_circle(size=150).encode(
-                    x=alt.X('Turn', scale=alt.Scale(domain=[-5, 2])),
-                    y=alt.Y('Fade', scale=alt.Scale(domain=[0, 6])),
-                    color=alt.Color('Typ'),
-                    tooltip=['Modell', 'Speed', 'Glide', 'Turn', 'Fade']
-                ).properties(height=400).interactive()
-                st.altair_chart(chart, use_container_width=True)
+            c_sim1, c_sim2 = st.columns([1, 2])
+            
+            with c_sim1:
+                st.markdown("**Test Rig Setup**")
+                power = st.slider("Power / Arm Speed (%)", 50, 150, 100, step=10, help="100% = Discens rating. >100% = Mer Turn. <100% = Mer Fade.")
+                selected_sim_discs = st.multiselect("Välj Discar att testa", my_inv["Modell"].unique())
+            
+            with c_sim2:
+                fig, ax = plt.subplots(figsize=(6, 6))
+                # Rita "Fairway" linjer
+                ax.axvline(0, color='white', linestyle='--', alpha=0.3)
                 
-                # Performance (Om data finns)
-                if not df.empty:
-                    st.divider()
-                    st.markdown("**Disc Performance**")
-                    disc_stats = df[df["Spelare"]==p].groupby("Disc_Used")["Resultat"].mean().reset_index().sort_values("Resultat")
-                    st.bar_chart(disc_stats.set_index("Disc_Used"))
-            else: st.warning("Tom väska.")
-        else: st.info("Välj spelare i menyn.")
+                if selected_sim_discs:
+                    for d_name in selected_sim_discs:
+                        d_row = my_inv[my_inv["Modell"] == d_name].iloc[0]
+                        xs, ys = simulate_flight(d_row["Speed"], d_row["Glide"], d_row["Turn"], d_row["Fade"], power/100.0)
+                        
+                        # Färg baserat på stabilitet (Turn + Fade)
+                        stab = d_row["Turn"] + d_row["Fade"]
+                        col = '#ff2800' if stab < 0 else '#0066cc' if stab > 2 else '#ffffff'
+                        
+                        ax.plot(xs, ys, label=d_name, color=col, linewidth=2)
+                
+                # Setup Graph Look
+                ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
+                ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
+                ax.set_xlim(-50, 50); ax.set_ylim(0, 150)
+                ax.set_xlabel("Sida (m)", color='white'); ax.set_ylabel("Längd (m)", color='white')
+                ax.grid(color='gray', linestyle=':', alpha=0.3)
+                if selected_sim_discs: ax.legend(facecolor='#1a1a1a', labelcolor='white')
+                st.pyplot(fig)
+        else: st.info("Välj spelare.")
 
-    with st3:
-        # SECTOR ANALYSIS (HOLES)
+    # 2. RACE PERFORMANCE (DEEP DIVE STATS)
+    with st2:
         if not df.empty:
-            sel_b = st.selectbox("Välj Bana för Analys", df["Bana"].unique())
-            hdf = df[df["Bana"]==sel_b]
+            c1, c2 = st.columns(2)
+            sel_p_stats = c1.selectbox("Förare", df["Spelare"].unique())
+            sel_c_stats = c2.selectbox("Grand Prix", df["Bana"].unique())
+            
+            dff = df[(df["Spelare"]==sel_p_stats) & (df["Bana"]==sel_c_stats)]
+            
+            if not dff.empty:
+                # KPI
+                c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
+                best_rnd = dff.groupby("Datum")["Resultat"].sum().min()
+                avg_rnd = dff.groupby("Datum")["Resultat"].sum().mean()
+                rounds_played = dff["Datum"].nunique()
+                
+                c_kpi1.metric("Personbästa (Runda)", f"{int(best_rnd)}")
+                c_kpi2.metric("Snitt (Runda)", f"{int(avg_rnd)}")
+                c_kpi3.metric("Lopp Körda", f"{rounds_played}")
+                
+                st.divider()
+                st.markdown("**Race Pace Trend**")
+                trend_data = dff.groupby("Datum")["Resultat"].sum().reset_index()
+                st.line_chart(trend_data.set_index("Datum"))
+            else: st.info("Ingen data för denna kombination.")
+        else: st.info("Ingen historik.")
+
+    # 3. SECTOR ANALYSIS
+    with st3:
+        if not df.empty:
+            sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
+            sel_p_sec = st.selectbox("Analysera Förare", df["Spelare"].unique(), key="sec_driver")
+            
+            hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"]==sel_p_sec)]
             
             if not hdf.empty:
-                # Heatmap Logic
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
-                chart = alt.Chart(hdf).mark_rect().encode(
+                # Aggregat per hål
+                hole_summary = hdf.groupby("Hål_Int")["Resultat"].mean().reset_index()
+                hole_summary["Par_Diff"] = hole_summary["Resultat"] - 3 # Antar par 3 för visualisering, kan förbättras
+                
+                # Färgkodning
+                c = alt.Chart(hole_summary).mark_bar().encode(
                     x=alt.X('Hål_Int:O', title='Hål'),
-                    y=alt.Y('Spelare', title='Förare'),
-                    color=alt.Color('mean(Resultat)', scale=alt.Scale(scheme='redyellowgreen', reverse=True), title='Snitt'),
-                    tooltip=['Spelare', 'Hål_Int', 'mean(Resultat)']
-                ).properties(height=200)
-                st.altair_chart(chart, use_container_width=True)
-            else: st.info("Ingen data för denna bana.")
+                    y=alt.Y('Resultat', title='Snittscore'),
+                    color=alt.condition(
+                        alt.datum.Resultat < 3,
+                        alt.value('green'),  # Birdie
+                        alt.condition(
+                            alt.datum.Resultat > 3,
+                            alt.value('#ff2800'),  # Bogey
+                            alt.value('grey')   # Par
+                        )
+                    ),
+                    tooltip=['Hål_Int', 'Resultat']
+                ).interactive()
+                
+                st.altair_chart(c, use_container_width=True)
+            else: st.info("Ingen data.")
 
 # TAB 6: ADMIN
 with t6:
@@ -628,12 +686,10 @@ with t6:
                 st.success(f"Importerade {len(nd)} rader!")
         except Exception as e: st.error(f"Fel: {e}")
 
-# TAB 7: PUTT-COACH (NEW)
+# TAB 7: PUTT-COACH
 with t7:
     st.header("🎯 PUTT-COACH SIMULATOR")
-    
     c1, c2 = st.columns([1, 2])
-    
     with c1:
         st.markdown("### 🎲 Generera Pass")
         game_mode = st.selectbox("Välj Spel", ["JYLY (Classic)", "Jorden Runt", "Ladder", "Random Pressure"])
@@ -646,16 +702,12 @@ with t7:
             elif game_mode == "Ladder":
                 for d in range(3, 11): st.session_state.putt_session.append({"Dist": d, "Kast": 1, "Träff": 0})
             else:
-                for i in range(5): 
-                    d = random.randint(4, 12); k = random.randint(3, 10)
-                    st.session_state.putt_session.append({"Dist": d, "Kast": k, "Träff": 0})
+                for i in range(5): d = random.randint(4, 12); k = random.randint(3, 10); st.session_state.putt_session.append({"Dist": d, "Kast": k, "Träff": 0})
             st.rerun()
-
     with c2:
         if st.session_state.putt_session:
             st.markdown(f"### 📋 Pågående: {game_mode}")
             total_hits = 0; total_throws = 0
-            
             for i, station in enumerate(st.session_state.putt_session):
                 with st.container(border=True):
                     cols = st.columns([2, 2, 1])
@@ -663,14 +715,10 @@ with t7:
                     res = cols[1].slider(f"Träffar (av {station['Kast']})", 0, station['Kast'], station['Träff'], key=f"putt_{i}")
                     st.session_state.putt_session[i]["Träff"] = res
                     total_hits += res; total_throws += station['Kast']
-            
             st.divider()
             score_col, chart_col = st.columns(2)
             pct = int((total_hits/total_throws)*100) if total_throws > 0 else 0
             score_col.metric("Total Score", f"{total_hits}/{total_throws}", f"{pct}%")
-            
             if st.button("🏁 Avsluta & Spara Pass"):
-                st.balloons(); st.success("Bra jobbat! Vila armen.")
-                st.session_state.putt_session = []; st.rerun()
-        else:
-            st.info("Starta ett pass till vänster.")
+                st.balloons(); st.success("Bra jobbat! Vila armen."); st.session_state.putt_session = []; st.rerun()
+        else: st.info("Starta ett pass till vänster.")
