@@ -137,17 +137,36 @@ if 'suggested_pack' not in st.session_state: st.session_state.suggested_pack = [
 if 'warmup_shots' not in st.session_state: st.session_state.warmup_shots = []
 
 # --- 3. LOGIK ---
-def suggest_disc(bag, player, dist, shape, form=1.0):
+def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_dir="Stilla"):
     pb = bag[(bag["Owner"]==player) & (bag["Status"]=="Bag")]
     if pb.empty: return None, "Tom väska"
     
+    # Justera effektiv distans baserat på dagsform
     eff_dist = dist / max(form, 0.5)
+    
+    # Justera target speed baserat på vind
+    # Motvind = Discen beter sig som lägre speed/mer understabil -> Vi behöver mer stabilitet
+    # Medvind = Discen beter sig som mer överstabil -> Vi behöver understabilitet/glide
+    
     target_speed = eff_dist / 10.0
     
     pb = pb.copy()
     for c in ["Speed", "Turn", "Fade"]:
         pb[c] = pd.to_numeric(pb[c], errors='coerce').fillna(0)
     
+    # VIND-JUSTERING AV DISCARNA
+    if "Motvind" in wind_dir:
+        # Motvind gör discen mer "Turny". Vi låtsas att discens Turn är lägre än den är för att hitta stabilare discar.
+        pb["Eff_Turn"] = pb["Turn"] - (wind_str * 0.5) 
+        advice_suffix = " (Motvind: Välj Stabil)"
+    elif "Medvind" in wind_dir:
+        # Medvind gör discen mer stabil. Vi behöver discar med högre Turn (mindre stabil) eller mer Glide.
+        pb["Eff_Turn"] = pb["Turn"] + (wind_str * 0.3)
+        advice_suffix = " (Medvind: Välj Glide/Turn)"
+    else:
+        pb["Eff_Turn"] = pb["Turn"]
+        advice_suffix = ""
+
     pb["Speed_Diff"] = abs(pb["Speed"] - target_speed)
     candidates = pb.copy()
     
@@ -157,12 +176,13 @@ def suggest_disc(bag, player, dist, shape, form=1.0):
     
     if candidates.empty: candidates = pb
     
-    if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Turn"] * 0.5)
+    # Score baseras nu på Eff_Turn (Vindjusterad)
+    if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Eff_Turn"] * 0.5)
     else: candidates["Score"] = candidates["Speed_Diff"]
     
-    if shape == "Höger": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Forehand"
-    elif shape == "Vänster": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Hyzer"
-    else: best = candidates.sort_values(by=["Score", "Turn"], ascending=[True, True]).iloc[0]; reason="Rakt"
+    if shape == "Höger": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Forehand" + advice_suffix
+    elif shape == "Vänster": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Hyzer" + advice_suffix
+    else: best = candidates.sort_values(by=["Score", "Eff_Turn"], ascending=[True, True]).iloc[0]; reason="Rakt" + advice_suffix
     return best, reason
 
 def generate_smart_bag(inventory, player, course_name):
@@ -187,7 +207,15 @@ def generate_smart_bag(inventory, player, course_name):
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v34.0 Ambidextrous")
+    st.caption("🟢 v35.0 Aero-Dynamic")
+    
+    # VÄDERSTATION
+    with st.expander("🌪️ Väderstation", expanded=True):
+        wind_str = st.slider("Vindstyrka (m/s)", 0, 15, 2)
+        wind_dir = st.radio("Vindriktning", ["Stilla", "Motvind", "Medvind", "Sidvind"], index=0)
+        temp = st.slider("Temperatur (°C)", -5, 35, 20)
+    
+    st.divider()
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -211,7 +239,7 @@ with st.sidebar:
 
 t1, t2, t3, t4, t5, t6 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📊 STATS", "⚙️ ADMIN"])
 
-# TAB 1: WARM-UP (Physics Engine + Styles)
+# TAB 1: WARM-UP (Physics Engine + Styles + Disc Potential)
 with t1:
     st.header("🔥 Driving Range")
     
@@ -258,7 +286,6 @@ with t1:
             st.subheader("2. Dina kast")
             if st.session_state.warmup_shots:
                 shots_df = pd.DataFrame(st.session_state.warmup_shots)
-                # Visa stil i tabellen
                 st.dataframe(shots_df[["disc", "style", "len", "side"]], hide_index=True, height=150)
                 
                 if st.button("🗑️ Rensa lista"):
@@ -269,72 +296,69 @@ with t1:
 
         st.markdown("---")
         
-        # --- DEL 3: RESULTAT & FYSIK ---
+        # --- DEL 3: RESULTAT & DISC-POTENTIAL ---
         if st.session_state.warmup_shots:
-            st.subheader("3. Analys")
-            ref_dist = st.number_input(f"Din normala Maxlängd (m)", 40, 150, 80)
+            st.subheader("3. Analys & Form")
             
             shots = st.session_state.warmup_shots
-            avg_len = np.mean([s["len"] for s in shots])
             
+            # Beräkna Formfaktor baserat på DISCENS Potential (Speed * 10)
+            total_potential_ratio = 0
             total_tech_side = 0
             
             for s in shots:
-                req_dist = s["speed"] * 10.0 
-                power_ratio = s["len"] / req_dist if req_dist > 0 else 1.0
+                # 1. Discens Optimala Längd (Tumregel: Speed * 10m)
+                # En Speed 12 ska gå 120m. En Speed 3 ska gå 30-40m.
+                optimal_dist = max(s["speed"] * 10.0, 40.0) 
+                ratio = s["len"] / optimal_dist
+                total_potential_ratio += ratio
                 
+                # 2. Teknik-analys (Sida)
+                req_dist = s["speed"] * 10.0
+                power_ratio = s["len"] / req_dist if req_dist > 0 else 1.0
                 expected_fade = s["fade"]
                 expected_turn = s["turn"] if power_ratio > 0.9 else 0
                 
-                # Fysik-riktningar baserat på stil (Högerhänt antagande)
                 if "Backhand" in s["style"]:
-                    fade_dir = -1 # Vänster
-                    turn_dir = 1  # Höger
-                else: # Forehand
-                    fade_dir = 1  # Höger
-                    turn_dir = -1 # Vänster
+                    fade_dir = -1; turn_dir = 1
+                else: 
+                    fade_dir = 1; turn_dir = -1
 
-                # Beräkna naturlig linje
-                if power_ratio < 0.8:
-                    natural_side = (expected_fade * 3 * fade_dir)
-                else:
-                    natural_side = (expected_turn * 2 * turn_dir) + (expected_fade * 2 * fade_dir)
+                if power_ratio < 0.8: natural_side = (expected_fade * 3 * fade_dir)
+                else: natural_side = (expected_turn * 2 * turn_dir) + (expected_fade * 2 * fade_dir)
                 
-                # Skillnad
-                diff = s["side"] - natural_side
-                total_tech_side += diff
+                total_tech_side += (s["side"] - natural_side)
 
+            # Slutlig Form
+            avg_form = total_potential_ratio / len(shots)
             avg_tech_side = total_tech_side / len(shots)
-            form_factor = avg_len / ref_dist
-            st.session_state.daily_forms[curr_p] = form_factor
+            
+            # Spara formen
+            st.session_state.daily_forms[curr_p] = avg_form
 
             c_res, c_gr = st.columns(2)
             
             with c_res:
-                st.metric("Snittlängd", f"{int(avg_len)}m")
-                st.metric("Dagsform (Kraft)", f"{int(form_factor*100)}%")
+                st.metric("Utnyttjad Potential", f"{int(avg_form*100)}%")
+                st.caption("Jämfört med vad dina discar är designade för.")
                 
-                st.markdown("**Teknik-analys (Stil-justerad):**")
-                # Analysera "Early" vs "Late" beror också på stil (Backhand Early = Left, Forehand Early = Left?)
-                # För enkelhetens skull, analysera Sida i förhållande till kastriktning
+                if avg_form > 1.0: st.success("💪 Du kastar längre än discens rating!")
+                elif avg_form < 0.7: st.warning("⚠️ Du får inte upp discarna i fart.")
                 
-                if abs(avg_tech_side) < 7:
-                    st.success("✅ Bra linjer! Träffar discens tänkta bana.")
-                else:
-                    dir_text = "Vänster" if avg_tech_side < 0 else "Höger"
-                    st.warning(f"⚠️ Teknik-avvikelse: Du missar {dir_text} om den naturliga linjen (ca {int(abs(avg_tech_side))}m).")
+                st.markdown("**Teknik:**")
+                if abs(avg_tech_side) < 7: st.success("✅ Rena träffar!")
+                else: 
+                    dir_txt = "Vänster" if avg_tech_side < 0 else "Höger"
+                    st.warning(f"⚠️ Teknikfel: Missar {dir_txt} om linjen ({int(abs(avg_tech_side))}m).")
                     
             with c_gr:
                 fig, ax = plt.subplots(figsize=(4,4))
                 x_vals = [s["side"] for s in shots]
                 y_vals = [s["len"] for s in shots]
-                # Färgkod: Röd=BH, Blå=FH
                 colors = ['#cc0000' if "Backhand" in s["style"] else '#0066cc' for s in shots]
-                
                 ax.scatter(x_vals, y_vals, c=colors, s=100, alpha=0.7)
                 ax.axvline(0, color='gray', linestyle='--')
-                ax.set_xlim(-40, 40)
-                ax.set_ylim(0, max(y_vals)*1.2)
+                ax.set_xlim(-40, 40); ax.set_ylim(0, max(y_vals)*1.2)
                 ax.set_title("Träffbild (Röd=BH, Blå=FH)")
                 st.pyplot(fig)
 
@@ -360,7 +384,8 @@ with t2:
         for p in st.session_state.active_players:
             with st.expander(f"{p} - {st.session_state.current_scores[hole][p]}", expanded=True):
                 curr_form = st.session_state.daily_forms.get(p, 1.0)
-                rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form)
+                # SKICKA MED VIND-DATA HÄR
+                rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form, wind_str, wind_dir)
                 if rec is not None: st.success(f"Caddy: {rec['Modell']} ({reason})")
                 else: st.warning("Tom väska")
                 c1, c2, c3 = st.columns([1,2,1])
