@@ -17,25 +17,74 @@ from geopy.distance import geodesic
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
 
-# SCUDERIA CSS (FERRARI THEME)
+# SCUDERIA LIVERY CSS (Red/White/Black/Yellow)
 st.markdown("""
     <style>
-    .stApp { background-color: #0e0e0e; color: #f0f0f0; }
-    h1, h2, h3 { color: #ff2800 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; }
+    /* Huvudbakgrund - Rosso Corsa */
+    .stApp {
+        background-color: #b80000;
+        color: #ffffff;
+    }
+    
+    /* Rubriker - Giallo Modena (Gul) med svart skugga för läsbarhet */
+    h1, h2, h3, h4 {
+        color: #fff200 !important;
+        font-family: 'Arial Black', sans-serif;
+        text-transform: uppercase;
+        text-shadow: 2px 2px 0px #000000;
+    }
+    
+    /* Sidebar - Carbon Black */
+    section[data-testid="stSidebar"] {
+        background-color: #111111;
+        border-right: 2px solid #fff200;
+    }
+    
+    /* Stat Cards - Svarta boxar med gul kant */
     .stat-card {
-        background-color: #1c1c1c;
-        border-left: 5px solid #ff2800;
+        background-color: #1a1a1a;
+        border-left: 5px solid #fff200;
         padding: 15px;
-        border-radius: 5px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        border-radius: 6px;
+        box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
         margin-bottom: 10px;
+        color: white;
     }
-    .stat-value { font-size: 24px; font-weight: bold; color: white; }
-    .stat-label { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 1px; }
+    .stat-value { font-size: 26px; font-weight: bold; color: #ffffff; }
+    .stat-label { font-size: 13px; text-transform: uppercase; color: #fff200; letter-spacing: 1px; font-weight: bold;}
+    
+    /* Knappar - Svarta med gul text */
     div.stButton > button {
-        background-color: #ff2800; color: white; border: none; border-radius: 4px; font-weight: bold; text-transform: uppercase;
+        background-color: #000000;
+        color: #fff200;
+        border: 2px solid #fff200;
+        border-radius: 4px;
+        font-weight: bold;
+        text-transform: uppercase;
     }
-    div.stButton > button:hover { background-color: #cc0000; color: white; }
+    div.stButton > button:hover {
+        background-color: #fff200;
+        color: #000000;
+        border-color: #000000;
+    }
+    
+    /* Inputs och Selectboxar - Gör dem tydliga */
+    div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+    }
+    div[data-baseweb="input"] > div {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+    }
+    
+    /* Expander - Svart bakgrund för texten i dem */
+    .streamlit-expanderContent {
+        background-color: #1a1a1a;
+        color: white;
+        border: 1px solid #fff200;
+        border-radius: 0 0 5px 5px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -230,7 +279,7 @@ def generate_smart_bag(inventory, player, course_name):
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v40.0 Rosso Corsa")
+    st.caption("🟢 v41.0 Scuderia Livery")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134)}
@@ -328,12 +377,17 @@ with t1:
             
             fig, ax = plt.subplots(figsize=(4,3))
             x=[s["side"] for s in shots]; y=[s["len"] for s in shots]
-            c=['#ff2800' if "Backhand" in s["style"] else '#0000ff' for s in shots]
-            ax.scatter(x,y,c=c,s=80,alpha=0.7); ax.axvline(0,c='gray',ls='--')
-            ax.set_xlim(-40,40); ax.set_ylim(0, max(y)*1.2); ax.set_facecolor('#1e1e1e'); fig.patch.set_facecolor('#1e1e1e'); ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white'); c2.pyplot(fig)
+            c=['#fff200' if "Backhand" in s["style"] else '#ffffff' for s in shots]
+            ax.scatter(x,y,c=c,s=80,alpha=0.7); ax.axvline(0,c='white',ls='--')
+            ax.set_xlim(-40,40); ax.set_ylim(0, max(y)*1.2)
+            # Anpassa grafen för röd bakgrund
+            ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
+            ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
+            ax.xaxis.label.set_color('white'); ax.yaxis.label.set_color('white'); ax.title.set_color('white')
+            c2.pyplot(fig)
     else: st.info("Välj spelare.")
 
-# TAB 2: RACE
+# TAB 2: RACE (PRECISION PILOT)
 with t2:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
@@ -540,7 +594,6 @@ with t5:
             st.markdown("---")
             st.subheader("📈 Race Telemetry (Trend)")
             
-            # Skapa en 'Runda' ID för att gruppera
             round_scores = dff.groupby(["Datum", "Spelare"])["Resultat"].mean().reset_index()
             
             chart = alt.Chart(round_scores).mark_line(point=True).encode(
@@ -574,12 +627,10 @@ with t5:
             st.markdown("---")
             st.subheader("🛞 Tyre Strategy (Disc Performance)")
             
-            # Filtrera bort "Unknown" och "Välj Disc"
             disc_stats = dff[~dff["Disc_Used"].isin(["Unknown", "Välj Disc", "None", None])]
             
             if not disc_stats.empty:
                 ds = disc_stats.groupby("Disc_Used")["Resultat"].agg(['mean', 'count']).reset_index()
-                # Visa bara discar med minst 2 kast
                 ds = ds[ds['count'] > 1].sort_values('mean')
                 
                 d_chart = alt.Chart(ds.head(10)).mark_bar().encode(
@@ -590,7 +641,7 @@ with t5:
                 )
                 st.altair_chart(d_chart, use_container_width=True)
             else:
-                st.info("Ingen disc-data tillgänglig än. Börja logga discar i Race-fliken!")
+                st.info("Ingen disc-data tillgänglig än.")
 
         else:
             st.info("Ingen data för valt filter.")
