@@ -48,9 +48,8 @@ def load_data_from_sheet():
         else:
             for col in ["Speed", "Glide", "Turn", "Fade"]:
                 df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0)
-            # Säkra att Status finns, default till 'Shelf' om tom
             if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
-            df_inv["Status"].fillna("Shelf", inplace=True)
+            df_inv["Status"] = df_inv["Status"].fillna("Shelf")
 
         # --- HISTORY ---
         try: ws_hist = sheet.worksheet("History")
@@ -144,18 +143,25 @@ def suggest_disc(bag, player, dist, shape, form=1.0):
     
     eff_dist = dist / max(form, 0.5)
     target_speed = eff_dist / 10.0
+    
+    # FIX: Skapa Speed_Diff PÅ GRUND-DATAT (pb) först
+    # Detta förhindrar att kolumnen försvinner om vi återställer
+    pb = pb.copy()
+    pb["Speed"] = pd.to_numeric(pb["Speed"], errors='coerce').fillna(0)
+    pb["Turn"] = pd.to_numeric(pb["Turn"], errors='coerce').fillna(0)
+    pb["Fade"] = pd.to_numeric(pb["Fade"], errors='coerce').fillna(0)
+    pb["Speed_Diff"] = abs(pb["Speed"] - target_speed)
+    
     candidates = pb.copy()
     
-    candidates["Speed"] = pd.to_numeric(candidates["Speed"], errors='coerce').fillna(0)
-    candidates["Turn"] = pd.to_numeric(candidates["Turn"], errors='coerce').fillna(0)
-    candidates["Fade"] = pd.to_numeric(candidates["Fade"], errors='coerce').fillna(0)
-    candidates["Speed_Diff"] = abs(candidates["Speed"] - target_speed)
+    if eff_dist < 45: candidates = candidates[candidates["Typ"]=="Putter"]
+    elif eff_dist < 85: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
+    elif eff_dist < 110: candidates = candidates[candidates["Typ"].isin(["Midrange", "Fairway Driver"])]
     
-    if eff_dist < 40: candidates = candidates[candidates["Typ"]=="Putter"]
-    elif eff_dist < 80: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
-    
+    # FIX: Om tomt, återställ till pb (som NU har Speed_Diff!)
     if candidates.empty: candidates = pb
     
+    # Nu finns Speed_Diff garanterat
     if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Turn"] * 0.5)
     else: candidates["Score"] = candidates["Speed_Diff"]
     
@@ -166,32 +172,22 @@ def suggest_disc(bag, player, dist, shape, form=1.0):
     return best, reason
 
 def generate_smart_bag(inventory, player, course_name):
-    # Logik för att välja rätt discar
     holes = st.session_state.courses[course_name]["holes"]
     avg_len = np.mean([h["l"] for h in holes.values()])
-    
-    # Hämta ALLA spelarens discar (Bag + Shelf)
     all_discs = inventory[inventory["Owner"] == player]
-    
     pack_indices = []
     
-    # 1. Putter
     putters = all_discs[all_discs["Typ"] == "Putter"].sort_values("Speed")
     if not putters.empty: pack_indices.append(putters.iloc[0].name)
-    
-    # 2. Midrange
     mids = all_discs[all_discs["Typ"] == "Midrange"]
     if not mids.empty: pack_indices.append(mids.sort_values("Glide", ascending=False).iloc[0].name)
-    
-    # 3. Fairway
     fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
     if not fairways.empty: pack_indices.append(fairways.iloc[0].name)
     
-    # 4. Anpassning
-    if avg_len > 80: # Lång bana
+    if avg_len > 80:
         drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
         if not drivers.empty: pack_indices.append(drivers.iloc[0].name)
-    else: # Kort bana
+    else:
         if len(putters) > 1: pack_indices.append(putters.iloc[1].name)
         
     return list(set(pack_indices))
@@ -199,7 +195,7 @@ def generate_smart_bag(inventory, player, course_name):
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v29.0 Logistics Manager")
+    st.caption("🟢 v29.1 Mobile Stable")
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -248,10 +244,8 @@ with t2:
         st.caption(inf.get('shape', 'Rak'))
 
     with col_s:
-        if hole not in st.session_state.current_scores: 
-            st.session_state.current_scores[hole] = {}
-        if hole not in st.session_state.selected_discs: 
-            st.session_state.selected_discs[hole] = {}
+        if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
+        if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
             
         for p in st.session_state.active_players:
             if p not in st.session_state.current_scores[hole]:
@@ -316,14 +310,17 @@ with t3:
 # TAB 4: UTRUSTNING (LOGISTICS MANAGER)
 with t4:
     st.header("🧳 Logistik-Center")
-    owner = st.selectbox("Hantera", st.session_state.active_players) if st.session_state.active_players else None
+    
+    # Auto-select ägare om bara en är aktiv, för att visa på mobil
+    default_owner = st.session_state.active_players[0] if st.session_state.active_players else None
+    owner = st.selectbox("Hantera", st.session_state.active_players, index=0) if st.session_state.active_players else None
     
     # 1. AI STRATEGEN
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
         tc = c1.selectbox("Bana att packa för:", list(st.session_state.courses.keys()))
-        if c2.button("Generera Packlista"):
+        if c2.button("Generera"):
             st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, owner, tc)
             st.rerun()
         
@@ -345,10 +342,13 @@ with t4:
     if owner:
         st.markdown("---")
         my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
-        col_shelf, col_bag = st.columns(2)
+        
+        # Använd containers istället för kolumner på mobil för bättre flöde
+        c_shelf = st.container(border=True)
+        c_bag = st.container(border=True)
         
         # VÄNSTER: HYLLAN (Shelf)
-        with col_shelf:
+        with c_shelf:
             st.subheader("🏠 Hyllan")
             shelf = my_inv[my_inv["Status"] == "Shelf"].sort_values("Speed")
             if shelf.empty: st.caption("Tomt.")
@@ -356,20 +356,20 @@ with t4:
                 for idx, row in shelf.iterrows():
                     c_txt, c_btn = st.columns([3, 1])
                     c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
-                    if c_btn.button("➡️", key=f"mv_bag_{idx}"):
+                    if c_btn.button("➡️ Bag", key=f"mv_bag_{idx}"):
                         st.session_state.inventory.at[idx, "Status"] = "Bag"
                         save_to_sheet(st.session_state.inventory, "Inventory")
                         st.rerun()
                         
         # HÖGER: BAGEN (Bag)
-        with col_bag:
+        with c_bag:
             st.subheader("🎒 Bagen")
             bag = my_inv[my_inv["Status"] == "Bag"].sort_values("Speed")
             if bag.empty: st.caption("Tomt.")
             else:
                 for idx, row in bag.iterrows():
                     c_btn, c_txt = st.columns([1, 3])
-                    if c_btn.button("⬅️", key=f"mv_shelf_{idx}"):
+                    if c_btn.button("⬅️ Hylla", key=f"mv_shelf_{idx}"):
                         st.session_state.inventory.at[idx, "Status"] = "Shelf"
                         save_to_sheet(st.session_state.inventory, "Inventory")
                         st.rerun()
