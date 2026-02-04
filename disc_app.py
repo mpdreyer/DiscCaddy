@@ -94,8 +94,6 @@ def analyze_image(image_bytes):
         prompt = """
         Identifiera discen.
         VIKTIGT OM TYP: Måste vara exakt en av dessa strängar: 'Putter', 'Midrange', 'Fairway Driver', 'Distance Driver'.
-        Om du är osäker, gissa baserat på rimligheten (Speed > 10 är Distance Driver, Speed < 4 är Putter).
-        
         Svara EXAKT JSON: 
         {
             "Modell": "Tillverkare Modell", 
@@ -144,31 +142,25 @@ def suggest_disc(bag, player, dist, shape, form=1.0):
     eff_dist = dist / max(form, 0.5)
     target_speed = eff_dist / 10.0
     
-    # FIX: Skapa Speed_Diff PÅ GRUND-DATAT (pb) först
-    # Detta förhindrar att kolumnen försvinner om vi återställer
     pb = pb.copy()
-    pb["Speed"] = pd.to_numeric(pb["Speed"], errors='coerce').fillna(0)
-    pb["Turn"] = pd.to_numeric(pb["Turn"], errors='coerce').fillna(0)
-    pb["Fade"] = pd.to_numeric(pb["Fade"], errors='coerce').fillna(0)
-    pb["Speed_Diff"] = abs(pb["Speed"] - target_speed)
+    for c in ["Speed", "Turn", "Fade"]:
+        pb[c] = pd.to_numeric(pb[c], errors='coerce').fillna(0)
     
+    pb["Speed_Diff"] = abs(pb["Speed"] - target_speed)
     candidates = pb.copy()
     
     if eff_dist < 45: candidates = candidates[candidates["Typ"]=="Putter"]
     elif eff_dist < 85: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
     elif eff_dist < 110: candidates = candidates[candidates["Typ"].isin(["Midrange", "Fairway Driver"])]
     
-    # FIX: Om tomt, återställ till pb (som NU har Speed_Diff!)
     if candidates.empty: candidates = pb
     
-    # Nu finns Speed_Diff garanterat
     if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Turn"] * 0.5)
     else: candidates["Score"] = candidates["Speed_Diff"]
     
     if shape == "Höger": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Forehand"
     elif shape == "Vänster": best = candidates.sort_values(by=["Score", "Fade"], ascending=[True, False]).iloc[0]; reason="Hyzer"
     else: best = candidates.sort_values(by=["Score", "Turn"], ascending=[True, True]).iloc[0]; reason="Rakt"
-        
     return best, reason
 
 def generate_smart_bag(inventory, player, course_name):
@@ -183,19 +175,17 @@ def generate_smart_bag(inventory, player, course_name):
     if not mids.empty: pack_indices.append(mids.sort_values("Glide", ascending=False).iloc[0].name)
     fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
     if not fairways.empty: pack_indices.append(fairways.iloc[0].name)
-    
     if avg_len > 80:
         drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
         if not drivers.empty: pack_indices.append(drivers.iloc[0].name)
     else:
         if len(putters) > 1: pack_indices.append(putters.iloc[1].name)
-        
     return list(set(pack_indices))
 
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v29.1 Mobile Stable")
+    st.caption("🟢 v30.0 The Cleaner")
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -234,42 +224,31 @@ with t2:
     courses = list(st.session_state.courses.keys())
     bana = st.selectbox("Bana", courses)
     c_data = st.session_state.courses[bana]
-    
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
         hole = st.selectbox("Hål", holes)
         inf = c_data["holes"][hole]
-        st.metric(f"Hål {hole}", f"{inf['l']}m", f"Par {inf['p']}")
-        st.caption(inf.get('shape', 'Rak'))
-
+        st.metric(f"Hål {hole}", f"{inf['l']}m", f"Par {inf['p']}"); st.caption(inf.get('shape', 'Rak'))
     with col_s:
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
-            
         for p in st.session_state.active_players:
-            if p not in st.session_state.current_scores[hole]:
-                st.session_state.current_scores[hole][p] = inf['p']
-            if p not in st.session_state.selected_discs[hole]:
-                st.session_state.selected_discs[hole][p] = None
-
+            if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
+            if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
         for p in st.session_state.active_players:
             with st.expander(f"{p} - {st.session_state.current_scores[hole][p]}", expanded=True):
                 curr_form = st.session_state.daily_forms.get(p, 1.0)
                 rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form)
-                
                 if rec is not None: st.success(f"Caddy: {rec['Modell']} ({reason})")
                 else: st.warning("Tom väska")
-                
                 c1, c2, c3 = st.columns([1,2,1])
                 if c1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
                 c2.markdown(f"<h2 style='text-align:center'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
                 if c3.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
-                
                 p_bag = st.session_state.inventory[(st.session_state.inventory["Owner"]==p) & (st.session_state.inventory["Status"]=="Bag")]
                 opts = ["Välj"] + p_bag["Modell"].tolist()
                 st.session_state.selected_discs[hole][p] = st.selectbox("Disc", opts, key=f"d_{hole}_{p}")
-
     if st.button("🏁 SPARA RUNDA", type="primary"):
         new_rows = []
         d = datetime.now().strftime("%Y-%m-%d")
@@ -277,7 +256,6 @@ with t2:
             for p, s in scores.items():
                 disc = st.session_state.selected_discs[h].get(p, "Unknown")
                 new_rows.append({"Datum": d, "Bana": bana, "Spelare": p, "Hål": h, "Resultat": s, "Par": c_data["holes"][h]["p"], "Disc_Used": disc})
-        
         new_df = pd.DataFrame(new_rows)
         st.session_state.history = pd.concat([st.session_state.history, new_df], ignore_index=True)
         save_to_sheet(st.session_state.history, "History")
@@ -288,17 +266,14 @@ with t3:
     st.header("🤖 AI-Chatt")
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
-
     if prompt := st.chat_input("Fråga..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
-        
         bag_info = ""
         if st.session_state.active_players:
             p = st.session_state.active_players[0]
             my_discs = st.session_state.inventory[st.session_state.inventory["Owner"]==p]["Modell"].tolist()
             bag_info = f"Min väska: {', '.join(my_discs)}."
-
         context = f"Du är en elit-discgolf caddy. {bag_info}. Svara kort."
         messages = [{"role": "system", "content": context}] + st.session_state.chat_history
         with st.chat_message("assistant"):
@@ -307,78 +282,70 @@ with t3:
                 st.markdown(reply)
         st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-# TAB 4: UTRUSTNING (LOGISTICS MANAGER)
+# TAB 4: UTRUSTNING (LOGISTICS)
 with t4:
     st.header("🧳 Logistik-Center")
-    
-    # Auto-select ägare om bara en är aktiv, för att visa på mobil
     default_owner = st.session_state.active_players[0] if st.session_state.active_players else None
     owner = st.selectbox("Hantera", st.session_state.active_players, index=0) if st.session_state.active_players else None
     
-    # 1. AI STRATEGEN
+    # 1. STRATEGEN
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
-        tc = c1.selectbox("Bana att packa för:", list(st.session_state.courses.keys()))
-        if c2.button("Generera"):
-            st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, owner, tc)
-            st.rerun()
-        
+        tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()))
+        if c2.button("Generera"): st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, owner, tc); st.rerun()
         if st.session_state.suggested_pack:
-            # Hämta namn för preview
             pack_names = st.session_state.inventory.loc[st.session_state.suggested_pack, "Modell"].tolist()
             c1.info(f"Föreslår: {', '.join(pack_names)}")
-            
             if c3.button("Verkställ", type="primary"):
-                # Sätt alla ägarens discar till Shelf först
                 st.session_state.inventory.loc[st.session_state.inventory["Owner"]==owner, "Status"] = "Shelf"
-                # Sätt valda till Bag
                 st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
                 save_to_sheet(st.session_state.inventory, "Inventory")
                 st.session_state.suggested_pack = []
                 st.success("Bagen packad!"); st.rerun()
 
-    # 2. HYLLA vs BAG
+    # 2. LISTOR (Sortering & Delete)
     if owner:
         st.markdown("---")
+        sort_mode = st.radio("Sortera på:", ["Speed", "Modell", "Typ"], horizontal=True)
         my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
         
-        # Använd containers istället för kolumner på mobil för bättre flöde
         c_shelf = st.container(border=True)
         c_bag = st.container(border=True)
         
-        # VÄNSTER: HYLLAN (Shelf)
         with c_shelf:
             st.subheader("🏠 Hyllan")
-            shelf = my_inv[my_inv["Status"] == "Shelf"].sort_values("Speed")
+            shelf = my_inv[my_inv["Status"] == "Shelf"].sort_values(sort_mode)
             if shelf.empty: st.caption("Tomt.")
             else:
                 for idx, row in shelf.iterrows():
-                    c_txt, c_btn = st.columns([3, 1])
+                    c_txt, c_btn, c_del = st.columns([3, 1, 0.5])
                     c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
-                    if c_btn.button("➡️ Bag", key=f"mv_bag_{idx}"):
+                    if c_btn.button("➡️", key=f"s2b_{idx}"):
                         st.session_state.inventory.at[idx, "Status"] = "Bag"
-                        save_to_sheet(st.session_state.inventory, "Inventory")
-                        st.rerun()
+                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+                    if c_del.button("🗑️", key=f"del_s_{idx}"):
+                        st.session_state.inventory = st.session_state.inventory.drop(idx)
+                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
                         
-        # HÖGER: BAGEN (Bag)
         with c_bag:
             st.subheader("🎒 Bagen")
-            bag = my_inv[my_inv["Status"] == "Bag"].sort_values("Speed")
+            bag = my_inv[my_inv["Status"] == "Bag"].sort_values(sort_mode)
             if bag.empty: st.caption("Tomt.")
             else:
                 for idx, row in bag.iterrows():
-                    c_btn, c_txt = st.columns([1, 3])
-                    if c_btn.button("⬅️ Hylla", key=f"mv_shelf_{idx}"):
+                    c_btn, c_txt, c_del = st.columns([1, 3, 0.5])
+                    if c_btn.button("⬅️", key=f"b2s_{idx}"):
                         st.session_state.inventory.at[idx, "Status"] = "Shelf"
-                        save_to_sheet(st.session_state.inventory, "Inventory")
-                        st.rerun()
+                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
                     c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
+                    if c_del.button("🗑️", key=f"del_b_{idx}"):
+                        st.session_state.inventory = st.session_state.inventory.drop(idx)
+                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
 
-    # 3. LÄGG TILL (KAMERA & MANUELL)
+    # 3. LÄGG TILL
     st.markdown("---")
-    with st.expander("➕ Lägg till ny disc (Vision & Manuell)"):
-        # Kamera Toggle
+    with st.expander("➕ Lägg till ny disc"):
         if st.checkbox("Visa Kamera"):
             img_file = st.camera_input("Fota discen")
             if img_file:
@@ -396,14 +363,11 @@ with t4:
             ai_d = st.session_state.ai_disc_data if st.session_state.ai_disc_data else {}
             c1, c2 = st.columns(2)
             mn = c1.text_input("Modell", value=ai_d.get("Modell", ""))
-            
-            # Smart Index Match
             v_types = ["Putter", "Midrange", "Fairway Driver", "Distance Driver"]
             r_type = ai_d.get("Typ", "Putter")
             f_idx = 0
             for i, vt in enumerate(v_types):
                 if vt.lower() in r_type.lower(): f_idx = i; break
-            
             ty = c2.selectbox("Typ", v_types, index=f_idx)
             c3, c4, c5, c6 = st.columns(4)
             sp = c3.number_input("Speed", 0.0, 15.0, float(ai_d.get("Speed", 7.0)))
@@ -416,8 +380,7 @@ with t4:
                 st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame([nw])], ignore_index=True)
                 save_to_sheet(st.session_state.inventory, "Inventory")
                 st.success(f"{mn} sparad!")
-                st.session_state.ai_disc_data = None
-                st.rerun()
+                st.session_state.ai_disc_data = None; st.rerun()
 
 # TAB 5: STATS
 with t5:
