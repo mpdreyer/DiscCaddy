@@ -42,16 +42,15 @@ def load_data_from_sheet():
         inv_data = ws_inv.get_all_records()
         df_inv = pd.DataFrame(inv_data)
         
-        # Säkra kolumner och datatyper (FIXEN ÄR HÄR)
         expected_inv = ["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"]
         if df_inv.empty: 
             df_inv = pd.DataFrame(columns=expected_inv)
         else:
-            # Tvinga siffror att vara siffror
-            numeric_cols = ["Speed", "Glide", "Turn", "Fade"]
-            for col in numeric_cols:
-                # Konvertera till numeric, sätt felaktiga värden till NaN, fyll sedan med 0
+            for col in ["Speed", "Glide", "Turn", "Fade"]:
                 df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0)
+            # Säkra att Status finns, default till 'Shelf' om tom
+            if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
+            df_inv["Status"].fillna("Shelf", inplace=True)
 
         # --- HISTORY ---
         try: ws_hist = sheet.worksheet("History")
@@ -93,7 +92,21 @@ def analyze_image(image_bytes):
     try:
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
         client = OpenAI(api_key=st.secrets["openai_key"])
-        prompt = "Identifiera discen. Svara EXAKT JSON: {\"Modell\": \"Namn\", \"Typ\": \"Putter/Midrange/Fairway/Distance\", \"Speed\": 0.0, \"Glide\": 0.0, \"Turn\": 0.0, \"Fade\": 0.0}. Gissa om otydligt."
+        prompt = """
+        Identifiera discen.
+        VIKTIGT OM TYP: Måste vara exakt en av dessa strängar: 'Putter', 'Midrange', 'Fairway Driver', 'Distance Driver'.
+        Om du är osäker, gissa baserat på rimligheten (Speed > 10 är Distance Driver, Speed < 4 är Putter).
+        
+        Svara EXAKT JSON: 
+        {
+            "Modell": "Tillverkare Modell", 
+            "Typ": "Fairway Driver", 
+            "Speed": 7.0, 
+            "Glide": 5.0, 
+            "Turn": 0.0, 
+            "Fade": 2.0
+        }
+        """
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}],
@@ -121,6 +134,8 @@ if 'selected_discs' not in st.session_state: st.session_state.selected_discs = {
 if 'daily_forms' not in st.session_state: st.session_state.daily_forms = {}
 if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 if 'ai_disc_data' not in st.session_state: st.session_state.ai_disc_data = None
+if 'camera_active' not in st.session_state: st.session_state.camera_active = False
+if 'suggested_pack' not in st.session_state: st.session_state.suggested_pack = []
 
 # --- 3. LOGIK ---
 def suggest_disc(bag, player, dist, shape, form=1.0):
@@ -131,11 +146,9 @@ def suggest_disc(bag, player, dist, shape, form=1.0):
     target_speed = eff_dist / 10.0
     candidates = pb.copy()
     
-    # Säkra att vi har siffror för beräkningen (Redundant men säkert)
     candidates["Speed"] = pd.to_numeric(candidates["Speed"], errors='coerce').fillna(0)
     candidates["Turn"] = pd.to_numeric(candidates["Turn"], errors='coerce').fillna(0)
     candidates["Fade"] = pd.to_numeric(candidates["Fade"], errors='coerce').fillna(0)
-    
     candidates["Speed_Diff"] = abs(candidates["Speed"] - target_speed)
     
     if eff_dist < 40: candidates = candidates[candidates["Typ"]=="Putter"]
@@ -152,10 +165,41 @@ def suggest_disc(bag, player, dist, shape, form=1.0):
         
     return best, reason
 
+def generate_smart_bag(inventory, player, course_name):
+    # Logik för att välja rätt discar
+    holes = st.session_state.courses[course_name]["holes"]
+    avg_len = np.mean([h["l"] for h in holes.values()])
+    
+    # Hämta ALLA spelarens discar (Bag + Shelf)
+    all_discs = inventory[inventory["Owner"] == player]
+    
+    pack_indices = []
+    
+    # 1. Putter
+    putters = all_discs[all_discs["Typ"] == "Putter"].sort_values("Speed")
+    if not putters.empty: pack_indices.append(putters.iloc[0].name)
+    
+    # 2. Midrange
+    mids = all_discs[all_discs["Typ"] == "Midrange"]
+    if not mids.empty: pack_indices.append(mids.sort_values("Glide", ascending=False).iloc[0].name)
+    
+    # 3. Fairway
+    fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
+    if not fairways.empty: pack_indices.append(fairways.iloc[0].name)
+    
+    # 4. Anpassning
+    if avg_len > 80: # Lång bana
+        drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
+        if not drivers.empty: pack_indices.append(drivers.iloc[0].name)
+    else: # Kort bana
+        if len(putters) > 1: pack_indices.append(putters.iloc[1].name)
+        
+    return list(set(pack_indices))
+
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v28.2 Type Safe")
+    st.caption("🟢 v29.0 Logistics Manager")
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -269,13 +313,73 @@ with t3:
                 st.markdown(reply)
         st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-# TAB 4: UTRUSTNING
+# TAB 4: UTRUSTNING (LOGISTICS MANAGER)
 with t4:
-    st.header("🧳 Moln-Bag")
+    st.header("🧳 Logistik-Center")
     owner = st.selectbox("Hantera", st.session_state.active_players) if st.session_state.active_players else None
     
-    with st.expander("📸 Lägg till Disc med Kamera"):
-        if st.checkbox("Starta Kamera"):
+    # 1. AI STRATEGEN
+    with st.container(border=True):
+        st.markdown("#### 🤖 Strategen")
+        c1, c2, c3 = st.columns([2, 1, 1])
+        tc = c1.selectbox("Bana att packa för:", list(st.session_state.courses.keys()))
+        if c2.button("Generera Packlista"):
+            st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, owner, tc)
+            st.rerun()
+        
+        if st.session_state.suggested_pack:
+            # Hämta namn för preview
+            pack_names = st.session_state.inventory.loc[st.session_state.suggested_pack, "Modell"].tolist()
+            c1.info(f"Föreslår: {', '.join(pack_names)}")
+            
+            if c3.button("Verkställ", type="primary"):
+                # Sätt alla ägarens discar till Shelf först
+                st.session_state.inventory.loc[st.session_state.inventory["Owner"]==owner, "Status"] = "Shelf"
+                # Sätt valda till Bag
+                st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
+                save_to_sheet(st.session_state.inventory, "Inventory")
+                st.session_state.suggested_pack = []
+                st.success("Bagen packad!"); st.rerun()
+
+    # 2. HYLLA vs BAG
+    if owner:
+        st.markdown("---")
+        my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
+        col_shelf, col_bag = st.columns(2)
+        
+        # VÄNSTER: HYLLAN (Shelf)
+        with col_shelf:
+            st.subheader("🏠 Hyllan")
+            shelf = my_inv[my_inv["Status"] == "Shelf"].sort_values("Speed")
+            if shelf.empty: st.caption("Tomt.")
+            else:
+                for idx, row in shelf.iterrows():
+                    c_txt, c_btn = st.columns([3, 1])
+                    c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
+                    if c_btn.button("➡️", key=f"mv_bag_{idx}"):
+                        st.session_state.inventory.at[idx, "Status"] = "Bag"
+                        save_to_sheet(st.session_state.inventory, "Inventory")
+                        st.rerun()
+                        
+        # HÖGER: BAGEN (Bag)
+        with col_bag:
+            st.subheader("🎒 Bagen")
+            bag = my_inv[my_inv["Status"] == "Bag"].sort_values("Speed")
+            if bag.empty: st.caption("Tomt.")
+            else:
+                for idx, row in bag.iterrows():
+                    c_btn, c_txt = st.columns([1, 3])
+                    if c_btn.button("⬅️", key=f"mv_shelf_{idx}"):
+                        st.session_state.inventory.at[idx, "Status"] = "Shelf"
+                        save_to_sheet(st.session_state.inventory, "Inventory")
+                        st.rerun()
+                    c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
+
+    # 3. LÄGG TILL (KAMERA & MANUELL)
+    st.markdown("---")
+    with st.expander("➕ Lägg till ny disc (Vision & Manuell)"):
+        # Kamera Toggle
+        if st.checkbox("Visa Kamera"):
             img_file = st.camera_input("Fota discen")
             if img_file:
                 if st.button("🔍 Analysera"):
@@ -288,27 +392,32 @@ with t4:
                             st.success("Hittad!")
                         except: st.error("Försök igen.")
 
-    with st.form("add_cloud"):
-        ai_d = st.session_state.ai_disc_data if st.session_state.ai_disc_data else {}
-        c1, c2 = st.columns(2)
-        mn = c1.text_input("Modell", value=ai_d.get("Modell", ""))
-        ty = c2.selectbox("Typ", ["Putter", "Midrange", "Fairway Driver", "Distance Driver"], index=0)
-        c3, c4, c5, c6 = st.columns(4)
-        sp = c3.number_input("Speed", 0.0, 15.0, float(ai_d.get("Speed", 7.0)))
-        gl = c4.number_input("Glide", 0.0, 7.0, float(ai_d.get("Glide", 5.0)))
-        tu = c5.number_input("Turn", -5.0, 1.0, float(ai_d.get("Turn", 0.0)))
-        fa = c6.number_input("Fade", 0.0, 6.0, float(ai_d.get("Fade", 2.0)))
-        
-        if st.form_submit_button("Spara till Databas"):
-            nw = {"Owner": owner, "Modell": mn, "Typ": ty, "Speed": sp, "Glide": gl, "Turn": tu, "Fade": fa, "Status": "Bag"}
-            st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame([nw])], ignore_index=True)
-            save_to_sheet(st.session_state.inventory, "Inventory")
-            st.success(f"{mn} sparad!")
-            st.session_state.ai_disc_data = None
-            st.rerun()
+        with st.form("add_cloud"):
+            ai_d = st.session_state.ai_disc_data if st.session_state.ai_disc_data else {}
+            c1, c2 = st.columns(2)
+            mn = c1.text_input("Modell", value=ai_d.get("Modell", ""))
             
-    if owner:
-        st.dataframe(st.session_state.inventory[st.session_state.inventory["Owner"]==owner])
+            # Smart Index Match
+            v_types = ["Putter", "Midrange", "Fairway Driver", "Distance Driver"]
+            r_type = ai_d.get("Typ", "Putter")
+            f_idx = 0
+            for i, vt in enumerate(v_types):
+                if vt.lower() in r_type.lower(): f_idx = i; break
+            
+            ty = c2.selectbox("Typ", v_types, index=f_idx)
+            c3, c4, c5, c6 = st.columns(4)
+            sp = c3.number_input("Speed", 0.0, 15.0, float(ai_d.get("Speed", 7.0)))
+            gl = c4.number_input("Glide", 0.0, 7.0, float(ai_d.get("Glide", 5.0)))
+            tu = c5.number_input("Turn", -5.0, 1.0, float(ai_d.get("Turn", 0.0)))
+            fa = c6.number_input("Fade", 0.0, 6.0, float(ai_d.get("Fade", 2.0)))
+            
+            if st.form_submit_button("Spara till Hyllan"):
+                nw = {"Owner": owner, "Modell": mn, "Typ": ty, "Speed": sp, "Glide": gl, "Turn": tu, "Fade": fa, "Status": "Shelf"}
+                st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame([nw])], ignore_index=True)
+                save_to_sheet(st.session_state.inventory, "Inventory")
+                st.success(f"{mn} sparad!")
+                st.session_state.ai_disc_data = None
+                st.rerun()
 
 # TAB 5: STATS
 with t5:
