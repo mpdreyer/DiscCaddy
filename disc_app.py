@@ -186,7 +186,7 @@ def generate_smart_bag(inventory, player, course_name):
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v31.0 The Driving Range")
+    st.caption("🟢 v32.0 Precision Range")
     
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
     
@@ -216,53 +216,58 @@ with t1:
     if st.session_state.active_players:
         curr_p = st.selectbox("Kalibrera:", st.session_state.active_players)
         
-        # Referens
+        # Hämta spelarens discar för listan
+        p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
+        disc_options = ["Välj Disc"] + p_inv["Modell"].unique().tolist()
+        
         with st.expander("⚙️ Inställningar (Ditt Normala Max)", expanded=True):
             ref_dist = st.number_input(f"Normal Maxlängd för {curr_p} (m)", 40, 150, 80, step=5, help="Används för att beräkna dagsform.")
         
         st.markdown("### 🏹 Mata in kast")
-        # Inmatning för 3 set
         c1, c2, c3 = st.columns(3)
         
-        throws_data = [] # [len, side]
+        # Data structure: [len, side, color, label]
+        points = []
         
         with c1:
-            st.markdown("**Set 1**")
-            l1 = st.number_input("K1 Längd", 0, 200, 0, key="s1k1l"); s1 = st.number_input("K1 Sida", -50, 50, 0, key="s1k1s", help="-Vänster / +Höger")
+            st.markdown("**Set 1 (Röd)**")
+            d1 = st.selectbox("Disc Set 1", disc_options, key="s1_d")
+            l1 = st.number_input("K1 Längd", 0, 200, 0, key="s1k1l"); s1 = st.number_input("K1 Sida", -50, 50, 0, key="s1k1s")
             l2 = st.number_input("K2 Längd", 0, 200, 0, key="s1k2l"); s2 = st.number_input("K2 Sida", -50, 50, 0, key="s1k2s")
             l3 = st.number_input("K3 Längd", 0, 200, 0, key="s1k3l"); s3 = st.number_input("K3 Sida", -50, 50, 0, key="s1k3s")
-            if l1>0: throws_data.append([l1, s1])
-            if l2>0: throws_data.append([l2, s2])
-            if l3>0: throws_data.append([l3, s3])
+            if l1>0: points.append([l1, s1, '#cc0000', d1])
+            if l2>0: points.append([l2, s2, '#cc0000', d1])
+            if l3>0: points.append([l3, s3, '#cc0000', d1])
 
         with c2:
-            st.markdown("**Set 2**")
+            st.markdown("**Set 2 (Blå)**")
+            d2 = st.selectbox("Disc Set 2", disc_options, key="s2_d")
             l4 = st.number_input("K1 Längd", 0, 200, 0, key="s2k1l"); s4 = st.number_input("K1 Sida", -50, 50, 0, key="s2k1s")
             l5 = st.number_input("K2 Längd", 0, 200, 0, key="s2k2l"); s5 = st.number_input("K2 Sida", -50, 50, 0, key="s2k2s")
             l6 = st.number_input("K3 Längd", 0, 200, 0, key="s2k3l"); s6 = st.number_input("K3 Sida", -50, 50, 0, key="s2k3s")
-            if l4>0: throws_data.append([l4, s4])
-            if l5>0: throws_data.append([l5, s5])
-            if l6>0: throws_data.append([l6, s6])
+            if l4>0: points.append([l4, s4, '#0066cc', d2])
+            if l5>0: points.append([l5, s5, '#0066cc', d2])
+            if l6>0: points.append([l6, s6, '#0066cc', d2])
 
         with c3:
-            st.markdown("**Set 3**")
+            st.markdown("**Set 3 (Grön)**")
+            d3 = st.selectbox("Disc Set 3", disc_options, key="s3_d")
             l7 = st.number_input("K1 Längd", 0, 200, 0, key="s3k1l"); s7 = st.number_input("K1 Sida", -50, 50, 0, key="s3k1s")
             l8 = st.number_input("K2 Längd", 0, 200, 0, key="s3k2l"); s8 = st.number_input("K2 Sida", -50, 50, 0, key="s3k2s")
             l9 = st.number_input("K3 Längd", 0, 200, 0, key="s3k3l"); s9 = st.number_input("K3 Sida", -50, 50, 0, key="s3k3s")
-            if l7>0: throws_data.append([l7, s7])
-            if l8>0: throws_data.append([l8, s8])
-            if l9>0: throws_data.append([l9, s9])
+            if l7>0: points.append([l7, s7, '#00cc66', d3])
+            if l8>0: points.append([l8, s8, '#00cc66', d3])
+            if l9>0: points.append([l9, s9, '#00cc66', d3])
 
         if st.button("📊 Analysera & Spara Form", type="primary"):
-            if throws_data:
-                avg_dist = sum([t[0] for t in throws_data]) / len(throws_data)
-                avg_side = sum([t[1] for t in throws_data]) / len(throws_data)
+            if points:
+                avg_dist = sum([p[0] for p in points]) / len(points)
+                avg_side = sum([p[1] for p in points]) / len(points)
                 
                 # Beräkna Form
                 form_factor = avg_dist / ref_dist
                 st.session_state.daily_forms[curr_p] = form_factor
                 
-                # Visa Resultat
                 c_res, c_gr = st.columns(2)
                 with c_res:
                     st.metric("Snittlängd", f"{int(avg_dist)}m")
@@ -275,18 +280,22 @@ with t1:
                     st.success(f"Caddyn är nu kalibrerad till {int(form_factor*100)}% kapacitet.")
 
                 with c_gr:
-                    # Scatter Plot
+                    # Advanced Scatter Plot
                     fig, ax = plt.subplots(figsize=(4,4))
-                    x_vals = [t[1] for t in throws_data]
-                    y_vals = [t[0] for t in throws_data]
                     
-                    ax.scatter(x_vals, y_vals, c='red', s=100, alpha=0.7)
-                    ax.axvline(0, color='gray', linestyle='--') # Mittenlinje
+                    # Rita varje set
+                    for color, label in [('#cc0000', d1), ('#0066cc', d2), ('#00cc66', d3)]:
+                        subset = [p for p in points if p[2] == color]
+                        if subset:
+                            ax.scatter([p[1] for p in subset], [p[0] for p in subset], c=color, s=100, alpha=0.7, label=label if label != "Välj Disc" else "Set")
+
+                    ax.axvline(0, color='gray', linestyle='--')
                     ax.set_xlim(-30, 30)
-                    ax.set_ylim(0, max(y_vals)*1.2)
+                    ax.set_ylim(0, max([p[0] for p in points])*1.2)
                     ax.set_xlabel("Sida (m)")
                     ax.set_ylabel("Längd (m)")
                     ax.set_title("Träffbild")
+                    ax.legend()
                     st.pyplot(fig)
             else:
                 st.warning("Mata in minst ett kast.")
