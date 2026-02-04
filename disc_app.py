@@ -14,8 +14,10 @@ import matplotlib.pyplot as plt
 import requests
 from geopy.distance import geodesic
 import random
+import tempfile
+import cv2 # Kräver opencv-python-headless i requirements.txt
 
-# Try import scipy for smooth curves
+# Try import scipy
 try:
     from scipy.interpolate import make_interp_spline
 except ImportError:
@@ -145,6 +147,35 @@ def analyze_image(image_bytes):
         return res.choices[0].message.content
     except: return None
 
+def analyze_video_form(video_bytes):
+    # Extrahera frames från video
+    try:
+        tfile = tempfile.NamedTemporaryFile(delete=False) 
+        tfile.write(video_bytes)
+        vidcap = cv2.VideoCapture(tfile.name)
+        frames = []
+        count = 0
+        success = True
+        while success and count < 30: # Ta max 30 frames
+            success, image = vidcap.read()
+            if success and count % 5 == 0: # Ta var 5:e frame
+                _, buffer = cv2.imencode('.jpg', image)
+                frames.append(base64.b64encode(buffer).decode('utf-8'))
+            count += 1
+        
+        # Skicka 3 nyckelframes till AI (Start, Middle, End)
+        if len(frames) >= 3:
+            key_frames = [frames[0], frames[len(frames)//2], frames[-1]]
+            client = OpenAI(api_key=st.secrets["openai_key"])
+            content = [{"type": "text", "text": "Analysera denna discgolf-kast teknik (Backhand/Forehand). Ge 3 konkreta tips för bättre form och längd. Fokusera på: Reach back, Power pocket och Follow through."}]
+            for f in key_frames:
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{f}"}})
+            
+            res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": content}], max_tokens=500)
+            return res.choices[0].message.content
+        return "Kunde inte läsa videon."
+    except Exception as e: return f"Video Error: {e}. (Kräver opencv-python-headless i requirements)"
+
 def get_tactical_advice(player, bag_df, dist, weather, situation, obstacles, image_bytes=None):
     bag_str = ", ".join([f"{r['Modell']} ({r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in bag_df.iterrows()])
     obs_str = ', '.join(obstacles)
@@ -259,7 +290,7 @@ if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 # --- UI LOGIC ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v46.2 Syntax Fix")
+    st.caption("🟢 v47.0 Academy Upgrade")
     
     with st.expander("📍 Plats & Väder", expanded=True):
         loc_presets = {"Kungsbacka": (57.492, 12.075), "Göteborg": (57.704, 12.036), "Borås": (57.721, 12.940), "Ale": (57.947, 12.134), "Lund": (55.704, 13.191)}
@@ -304,7 +335,7 @@ with st.sidebar:
         st.rerun()
     if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
-t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 TELEMETRY", "⚙️ ADMIN", "🎯 PUTT"])
+t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 TELEMETRY", "⚙️ ADMIN", "🎓 ACADEMY"])
 
 # TAB 1: WARM-UP
 with t1:
@@ -516,10 +547,10 @@ with t4:
                 save_to_sheet(st.session_state.inventory, "Inventory")
                 st.success(f"{mn} sparad!"); st.session_state.ai_disc_data = None; st.rerun()
 
-# TAB 5: TELEMETRY (AERO SIM)
+# TAB 5: TELEMETRY (MULTI-PLAYER)
 with t5:
     st.header("📈 SCUDERIA TELEMETRY")
-    st1, st2, st3 = st.tabs(["✈️ Aero Lab (Flight Sim)", "🏎️ Race Performance (Stats)", "🧩 Sector Analysis (Holes)"])
+    st1, st2, st3 = st.tabs(["✈️ Aero Lab", "🏎️ Race Performance", "🧩 Sector Analysis"])
     df = st.session_state.history
     
     with st1:
@@ -529,7 +560,6 @@ with t5:
             my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
             c_sim1, c_sim2 = st.columns([1, 2])
             with c_sim1:
-                st.markdown("**Test Rig Setup**")
                 power = st.slider("Power (%)", 50, 150, 100, step=10)
                 selected_sim_discs = st.multiselect("Välj Discar", my_inv["Modell"].unique())
             with c_sim2:
@@ -545,7 +575,6 @@ with t5:
                 ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
                 ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
                 ax.set_xlim(-50, 50); ax.set_ylim(0, 150)
-                ax.set_xlabel("Sida (m)", color='white'); ax.set_ylabel("Längd (m)", color='white')
                 ax.grid(color='gray', linestyle=':', alpha=0.3)
                 if selected_sim_discs: ax.legend(facecolor='#1a1a1a', labelcolor='white')
                 st.pyplot(fig)
@@ -554,45 +583,39 @@ with t5:
     with st2:
         if not df.empty:
             c1, c2 = st.columns(2)
-            sel_p_stats = c1.selectbox("Förare", df["Spelare"].unique())
+            # MULTI-PLAYER ENABLED
+            sel_p_stats = c1.multiselect("Förare (Jämför)", df["Spelare"].unique(), default=df["Spelare"].unique())
             sel_c_stats = c2.selectbox("Grand Prix", df["Bana"].unique())
-            dff = df[(df["Spelare"]==sel_p_stats) & (df["Bana"]==sel_c_stats)]
+            
+            dff = df[(df["Spelare"].isin(sel_p_stats)) & (df["Bana"]==sel_c_stats)]
             if not dff.empty:
-                c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
-                best_rnd = dff.groupby("Datum")["Resultat"].sum().min()
-                avg_rnd = dff.groupby("Datum")["Resultat"].sum().mean()
-                c_kpi1.metric("Bästa Runda", f"{int(best_rnd)}")
-                c_kpi2.metric("Snitt", f"{int(avg_rnd)}")
-                c_kpi3.metric("Lopp", f"{dff['Datum'].nunique()}")
-                st.divider()
                 st.markdown("**Race Pace Trend**")
-                trend_data = dff.groupby("Datum")["Resultat"].sum().reset_index()
-                st.line_chart(trend_data.set_index("Datum"))
+                trend_data = dff.groupby(["Datum", "Spelare"])["Resultat"].mean().reset_index()
+                chart = alt.Chart(trend_data).mark_line(point=True).encode(
+                    x='Datum:T', y='Resultat', color='Spelare', tooltip=['Datum', 'Spelare', 'Resultat']
+                ).interactive()
+                st.altair_chart(chart, use_container_width=True)
             else: st.info("Ingen data.")
         else: st.info("Ingen historik.")
 
     with st3:
         if not df.empty:
             sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
-            sel_p_sec = st.selectbox("Analysera Förare", df["Spelare"].unique(), key="sec_driver")
-            hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"]==sel_p_sec)]
+            # MULTI-PLAYER ENABLED
+            sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=df["Spelare"].unique())
+            
+            hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"].isin(sel_p_sec))]
             if not hdf.empty:
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
-                hole_summary = hdf.groupby("Hål_Int")["Resultat"].mean().reset_index()
+                hole_summary = hdf.groupby(["Hål_Int", "Spelare"])["Resultat"].mean().reset_index()
                 
-                # SAFE COLOR LOGIC (Data Prep)
-                def get_status(score):
-                    if score < 3.0: return 'Birdie'
-                    elif score > 3.0: return 'Bogey'
-                    return 'Par'
-                
-                hole_summary['Status'] = hole_summary['Resultat'].apply(get_status)
-                
+                # Grouped Bar Chart for Comparison
                 c = alt.Chart(hole_summary).mark_bar().encode(
-                    x=alt.X('Hål_Int:O', title='Hål'),
+                    x=alt.X('Spelare:N', axis=None), # Hide axis labels for cleaner look within groups
                     y=alt.Y('Resultat', title='Snittscore'),
-                    color=alt.Color('Status', scale=alt.Scale(domain=['Birdie', 'Par', 'Bogey'], range=['#00ff00', '#cccccc', '#ff2800'])),
-                    tooltip=['Hål_Int', 'Resultat']
+                    color='Spelare',
+                    column=alt.Column('Hål_Int:O', title="Hål"), # Facet by hole
+                    tooltip=['Spelare', 'Hål_Int', 'Resultat']
                 ).interactive()
                 st.altair_chart(c, use_container_width=True)
             else: st.info("Ingen data.")
@@ -618,39 +641,55 @@ with t6:
                 st.success(f"Importerade {len(nd)} rader!")
         except Exception as e: st.error(f"Fel: {e}")
 
-# TAB 7: PUTT-COACH
+# TAB 7: ACADEMY (NEW)
 with t7:
-    st.header("🎯 PUTT-COACH SIMULATOR")
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.markdown("### 🎲 Generera Pass")
-        game_mode = st.selectbox("Välj Spel", ["JYLY (Classic)", "Jorden Runt", "Ladder", "Random Pressure"])
-        if st.button("Starta Nytt Pass", type="primary"):
-            st.session_state.putt_session = []
-            if game_mode == "JYLY (Classic)":
-                for d in [5, 6, 7, 8, 9, 10]: st.session_state.putt_session.append({"Dist": d, "Kast": 5, "Träff": 0})
-            elif game_mode == "Jorden Runt":
-                for d in [4, 5, 6, 7, 8, 9, 10]: st.session_state.putt_session.append({"Dist": d, "Kast": 3, "Träff": 0})
-            elif game_mode == "Ladder":
-                for d in range(3, 11): st.session_state.putt_session.append({"Dist": d, "Kast": 1, "Träff": 0})
-            else:
-                for i in range(5): d = random.randint(4, 12); k = random.randint(3, 10); st.session_state.putt_session.append({"Dist": d, "Kast": k, "Träff": 0})
-            st.rerun()
-    with c2:
-        if st.session_state.putt_session:
-            st.markdown(f"### 📋 Pågående: {game_mode}")
-            total_hits = 0; total_throws = 0
-            for i, station in enumerate(st.session_state.putt_session):
-                with st.container(border=True):
-                    cols = st.columns([2, 2, 1])
-                    cols[0].metric(f"Station {i+1}", f"{station['Dist']}m")
-                    res = cols[1].slider(f"Träffar (av {station['Kast']})", 0, station['Kast'], station['Träff'], key=f"putt_{i}")
-                    st.session_state.putt_session[i]["Träff"] = res
-                    total_hits += res; total_throws += station['Kast']
-            st.divider()
-            score_col, chart_col = st.columns(2)
-            pct = int((total_hits/total_throws)*100) if total_throws > 0 else 0
-            score_col.metric("Total Score", f"{total_hits}/{total_throws}", f"{pct}%")
-            if st.button("🏁 Avsluta & Spara Pass"):
-                st.balloons(); st.success("Bra jobbat! Vila armen."); st.session_state.putt_session = []; st.rerun()
-        else: st.info("Starta ett pass till vänster.")
+    st.header("🎓 SCUDERIA ACADEMY")
+    
+    st1, st2 = st.tabs(["🎯 Putt-Coach", "📹 Video Scout (Beta)"])
+    
+    with st1:
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.markdown("### 🎲 Generera Pass")
+            game_mode = st.selectbox("Välj Spel", ["JYLY (Classic)", "Jorden Runt", "Ladder", "Random Pressure"])
+            if st.button("Starta Nytt Pass", type="primary"):
+                st.session_state.putt_session = []
+                if game_mode == "JYLY (Classic)":
+                    for d in [5, 6, 7, 8, 9, 10]: st.session_state.putt_session.append({"Dist": d, "Kast": 5, "Träff": 0})
+                elif game_mode == "Jorden Runt":
+                    for d in [4, 5, 6, 7, 8, 9, 10]: st.session_state.putt_session.append({"Dist": d, "Kast": 3, "Träff": 0})
+                elif game_mode == "Ladder":
+                    for d in range(3, 11): st.session_state.putt_session.append({"Dist": d, "Kast": 1, "Träff": 0})
+                else:
+                    for i in range(5): d = random.randint(4, 12); k = random.randint(3, 10); st.session_state.putt_session.append({"Dist": d, "Kast": k, "Träff": 0})
+                st.rerun()
+        with c2:
+            if st.session_state.putt_session:
+                st.markdown(f"### 📋 Pågående: {game_mode}")
+                total_hits = 0; total_throws = 0
+                for i, station in enumerate(st.session_state.putt_session):
+                    with st.container(border=True):
+                        cols = st.columns([2, 2, 1])
+                        cols[0].metric(f"Station {i+1}", f"{station['Dist']}m")
+                        res = cols[1].slider(f"Träffar (av {station['Kast']})", 0, station['Kast'], station['Träff'], key=f"putt_{i}")
+                        st.session_state.putt_session[i]["Träff"] = res
+                        total_hits += res; total_throws += station['Kast']
+                st.divider()
+                score_col, chart_col = st.columns(2)
+                pct = int((total_hits/total_throws)*100) if total_throws > 0 else 0
+                score_col.metric("Total Score", f"{total_hits}/{total_throws}", f"{pct}%")
+                if st.button("🏁 Avsluta & Spara Pass"):
+                    st.balloons(); st.success("Bra jobbat! Vila armen."); st.session_state.putt_session = []; st.rerun()
+            else: st.info("Starta ett pass till vänster.")
+
+    with st2:
+        st.subheader("📹 Video Form Check")
+        st.caption("Ladda upp en video på ditt kast. AI:n analyserar din teknik. (Kräver videostöd i servern)")
+        
+        vid_file = st.file_uploader("Ladda upp video (max 20MB)", type=['mp4', 'mov'])
+        if vid_file:
+            st.video(vid_file)
+            if st.button("🧠 Analysera Teknik"):
+                with st.spinner("AI-ögat granskar din sving..."):
+                    advice = analyze_video_form(vid_file.read())
+                    st.markdown(advice)
