@@ -470,4 +470,150 @@ with t4:
             if bag.empty: st.caption("Tomt.")
             else:
                 for idx, row in bag.iterrows():
-                    c_btn, c_txt, c
+                    c_btn, c_txt, c_del = st.columns([1, 3, 0.5])
+                    if c_btn.button("⬅️", key=f"b2s_{idx}"):
+                        st.session_state.inventory.at[idx, "Status"] = "Shelf"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+                    c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
+                    if c_del.button("🗑️", key=f"del_b_{idx}"):
+                        st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+
+    st.markdown("---")
+    with st.expander("➕ Lägg till ny disc"):
+        if st.checkbox("Visa Kamera"):
+            img_file = st.camera_input("Fota discen")
+            if img_file:
+                if st.button("🔍 Analysera"):
+                    with st.spinner("AI jobbar..."):
+                        b_data = img_file.getvalue()
+                        json_str = analyze_image(b_data)
+                        try:
+                            json_str = json_str.replace("```json", "").replace("```", "").strip()
+                            st.session_state.ai_disc_data = json.loads(json_str); st.success("Hittad!")
+                        except: st.error("Försök igen.")
+        with st.form("add_cloud"):
+            ai_d = st.session_state.ai_disc_data if st.session_state.ai_disc_data else {}
+            c1, c2 = st.columns(2)
+            mn = c1.text_input("Modell", value=ai_d.get("Modell", ""))
+            v_types = ["Putter", "Midrange", "Fairway Driver", "Distance Driver"]
+            r_type = ai_d.get("Typ", "Putter"); f_idx = 0
+            for i, vt in enumerate(v_types):
+                if vt.lower() in r_type.lower(): f_idx = i; break
+            ty = c2.selectbox("Typ", v_types, index=f_idx)
+            c3, c4, c5, c6 = st.columns(4)
+            sp = c3.number_input("Speed", 0.0, 15.0, float(ai_d.get("Speed", 7.0)))
+            gl = c4.number_input("Glide", 0.0, 7.0, float(ai_d.get("Glide", 5.0)))
+            tu = c5.number_input("Turn", -5.0, 1.0, float(ai_d.get("Turn", 0.0)))
+            fa = c6.number_input("Fade", 0.0, 6.0, float(ai_d.get("Fade", 2.0)))
+            if st.form_submit_button("Spara till Hyllan"):
+                nw = {"Owner": owner, "Modell": mn, "Typ": ty, "Speed": sp, "Glide": gl, "Turn": tu, "Fade": fa, "Status": "Shelf"}
+                st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame([nw])], ignore_index=True)
+                save_to_sheet(st.session_state.inventory, "Inventory")
+                st.success(f"{mn} sparad!"); st.session_state.ai_disc_data = None; st.rerun()
+
+# TAB 5: SCUDERIA TELEMETRY (STATS)
+with t5:
+    st.header("🏎️ SCUDERIA TELEMETRY CENTER")
+    
+    df = st.session_state.history
+    if not df.empty:
+        # FILTER
+        c1, c2 = st.columns(2)
+        sel_p = c1.multiselect("Förare (Spelare)", df["Spelare"].unique(), default=df["Spelare"].unique())
+        sel_c = c2.multiselect("Grand Prix (Bana)", df["Bana"].unique(), default=df["Bana"].unique())
+        
+        dff = df[(df["Spelare"].isin(sel_p)) & (df["Bana"].isin(sel_c))]
+        
+        if not dff.empty:
+            # 1. PADDOCK OVERVIEW (KPIs)
+            st.subheader("📊 Paddock Overview")
+            col1, col2, col3 = st.columns(3)
+            
+            avg_score = dff["Resultat"].mean()
+            best_round = dff.groupby(["Datum", "Spelare"])["Resultat"].sum().min()
+            total_holes = len(dff)
+            
+            col1.markdown(f"<div class='stat-card'><div class='stat-label'>Snitt Score (Hål)</div><div class='stat-value'>{avg_score:.2f}</div></div>", unsafe_allow_html=True)
+            col2.markdown(f"<div class='stat-card'><div class='stat-label'>Bästa Runda (Total)</div><div class='stat-value'>{int(best_round) if not np.isnan(best_round) else '-'}</div></div>", unsafe_allow_html=True)
+            col3.markdown(f"<div class='stat-card'><div class='stat-label'>Antal Hål Spelade</div><div class='stat-value'>{total_holes}</div></div>", unsafe_allow_html=True)
+
+            # 2. TELEMETRY (Trend)
+            st.markdown("---")
+            st.subheader("📈 Race Telemetry (Trend)")
+            
+            # Skapa en 'Runda' ID för att gruppera
+            round_scores = dff.groupby(["Datum", "Spelare"])["Resultat"].mean().reset_index()
+            
+            chart = alt.Chart(round_scores).mark_line(point=True).encode(
+                x='Datum:T',
+                y=alt.Y('Resultat', title='Snittscore per hål', scale=alt.Scale(zero=False)),
+                color=alt.Color('Spelare', scale=alt.Scale(scheme='category10')),
+                tooltip=['Datum', 'Spelare', 'Resultat']
+            ).properties(height=300)
+            st.altair_chart(chart, use_container_width=True)
+
+            # 3. SECTOR ANALYSIS (Hål för Hål)
+            st.markdown("---")
+            st.subheader("🧩 Sector Analysis (Hål)")
+            
+            try:
+                dff['Hål_Int'] = pd.to_numeric(dff['Hål'], errors='coerce')
+                hole_stats = dff.groupby(['Hål_Int', 'Spelare'])['Resultat'].mean().reset_index()
+                
+                h_chart = alt.Chart(hole_stats).mark_bar().encode(
+                    x=alt.X('Hål_Int:O', title='Hål'),
+                    y=alt.Y('Resultat', title='Snitt'),
+                    color='Spelare',
+                    xOffset='Spelare',
+                    tooltip=['Hål_Int', 'Spelare', 'Resultat']
+                )
+                st.altair_chart(h_chart, use_container_width=True)
+            except:
+                st.warning("Kunde inte visualisera hål-data.")
+
+            # 4. TYRE STRATEGY (Disc Stats)
+            st.markdown("---")
+            st.subheader("🛞 Tyre Strategy (Disc Performance)")
+            
+            # Filtrera bort "Unknown" och "Välj Disc"
+            disc_stats = dff[~dff["Disc_Used"].isin(["Unknown", "Välj Disc", "None", None])]
+            
+            if not disc_stats.empty:
+                ds = disc_stats.groupby("Disc_Used")["Resultat"].agg(['mean', 'count']).reset_index()
+                # Visa bara discar med minst 2 kast
+                ds = ds[ds['count'] > 1].sort_values('mean')
+                
+                d_chart = alt.Chart(ds.head(10)).mark_bar().encode(
+                    x=alt.X('Disc_Used', sort='-y', title='Disc'),
+                    y=alt.Y('mean', title='Snittscore'),
+                    color=alt.Color('mean', scale=alt.Scale(scheme='redyellowgreen', reverse=True)),
+                    tooltip=['Disc_Used', 'mean', 'count']
+                )
+                st.altair_chart(d_chart, use_container_width=True)
+            else:
+                st.info("Ingen disc-data tillgänglig än. Börja logga discar i Race-fliken!")
+
+        else:
+            st.info("Ingen data för valt filter.")
+    else:
+        st.info("Databasen är tom. Gå till Race-fliken och kör!")
+
+# TAB 6: ADMIN
+with t6:
+    st.subheader("⚙️ Admin")
+    up = st.file_uploader("Ladda upp CSV", type=['csv'])
+    if up and st.button("Kör Import"):
+        try:
+            udf = pd.read_csv(up); nd = []
+            for i, r in udf.iterrows():
+                if r.get('PlayerName')=='Par': continue
+                mn = "Mattias" if "Mattias" in r.get('PlayerName','') else "Jenny" if "Jenny" in r.get('PlayerName','') else r.get('PlayerName')
+                raw_date = str(r.get('StartDate', r.get('Date', datetime.now())))[:10]
+                for hi in range(1, 19):
+                    h_score = r.get(f"Hole{hi}")
+                    if pd.notna(h_score):
+                        nd.append({"Datum": raw_date, "Bana": r.get('CourseName', 'Unknown'), "Spelare": mn, "Hål": str(hi), "Resultat": int(h_score), "Par": 3, "Disc_Used": "Unknown"})
+            if nd:
+                new_hist = pd.concat([st.session_state.history, pd.DataFrame(nd)], ignore_index=True)
+                st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
+                st.success(f"Importerade {len(nd)} rader!")
+        except Exception as e: st.error(f"Fel: {e}")
