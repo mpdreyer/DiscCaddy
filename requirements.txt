@@ -12,3 +12,4 @@ oauth2client
 Pillow
 requests
 scipy
+opencv-python-headless
