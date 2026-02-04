@@ -12,6 +12,7 @@ import base64
 import json
 import matplotlib.pyplot as plt
 import requests
+from geopy.distance import geodesic
 
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
@@ -31,44 +32,30 @@ def get_gsheet_client():
 def load_data_from_sheet():
     client = get_gsheet_client()
     if not client: return pd.DataFrame(), pd.DataFrame()
-    
     try:
         sheet = client.open("DiscCaddy_DB")
-        
-        # --- INVENTORY ---
+        # Inventory
         try: ws_inv = sheet.worksheet("Inventory")
-        except:
-            ws_inv = sheet.add_worksheet("Inventory", 100, 10)
-            ws_inv.append_row(["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
-            
+        except: ws_inv = sheet.add_worksheet("Inventory", 100, 10); ws_inv.append_row(["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
         inv_data = ws_inv.get_all_records()
         df_inv = pd.DataFrame(inv_data)
-        
-        expected_inv = ["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"]
-        if df_inv.empty: 
-            df_inv = pd.DataFrame(columns=expected_inv)
+        if df_inv.empty: df_inv = pd.DataFrame(columns=["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
         else:
             for col in ["Speed", "Glide", "Turn", "Fade"]:
                 df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0)
             if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
             df_inv["Status"] = df_inv["Status"].fillna("Shelf")
 
-        # --- HISTORY ---
+        # History
         try: ws_hist = sheet.worksheet("History")
-        except:
-            ws_hist = sheet.add_worksheet("History", 100, 10)
-            ws_hist.append_row(["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
-            
+        except: ws_hist = sheet.add_worksheet("History", 100, 10); ws_hist.append_row(["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
         hist_data = ws_hist.get_all_records()
         df_hist = pd.DataFrame(hist_data)
-        expected_hist = ["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"]
-        if df_hist.empty: df_hist = pd.DataFrame(columns=expected_hist)
+        if df_hist.empty: df_hist = pd.DataFrame(columns=["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
         
         return df_inv, df_hist
-
     except Exception as e:
-        st.error(f"Databas-fel: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+        st.error(f"Databas-fel: {e}"); return pd.DataFrame(), pd.DataFrame()
 
 def save_to_sheet(df, worksheet_name):
     client = get_gsheet_client()
@@ -81,24 +68,51 @@ def save_to_sheet(df, worksheet_name):
         ws.update([df.columns.values.tolist()] + df.values.tolist())
     except Exception as e: st.error(f"Sparfel: {e}")
 
-# Weather API (Open-Meteo)
+# --- EXTENDED COURSE DATABASE (Skatås & Co) ---
+DEFAULT_COURSES = {
+    "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": "Rak"} for x,y in zip(range(1,10), [63,81,48,65,75,55,62,78,52])}},
+    "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
+    "Åbyvallen": {"lat": 57.480, "lon": 12.070, "holes": {str(x):{"l": 70, "p": 3, "shape": "Vänster"} for x in range(1,9)}},
+    "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 90, "p": 3, "shape": "Rak"} for x in range(1,19)}},
+    "Skatås (Vit)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 120, "p": 4 if x in [5,12] else 3, "shape": "Rak"} for x in range(1,19)}},
+    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 100, "p": 3, "shape": "Skog"} for x in range(1,19)}},
+    "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
+}
+
+# --- GPS & OSM LOGIC ---
 def get_live_weather(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms"
-        res = requests.get(url)
+        res = requests.get(url, timeout=3)
         data = res.json()
-        if "current_weather" in data:
-            return data["current_weather"]
-    except:
-        pass
+        if "current_weather" in data: return data["current_weather"]
+    except: pass
     return None
 
-def get_wind_direction_str(degrees):
-    val = int((degrees/22.5) + .5)
-    arr = ["N", "NNO", "NO", "ONO", "O", "OSO", "SO", "SSO", "S", "SSV", "SV", "VSV", "V", "VNV", "NV", "NNV"]
-    return arr[(val % 16)]
+def find_courses_via_osm(lat, lon, radius=5000):
+    # Query OpenStreetMap for 'sport=disc_golf' nodes/ways around location
+    overpass_url = "http://overpass-api.de/api/interpreter"
+    overpass_query = f"""
+    [out:json];
+    (
+      node["sport"="disc_golf"](around:{radius},{lat},{lon});
+      way["sport"="disc_golf"](around:{radius},{lat},{lon});
+    );
+    out center;
+    """
+    try:
+        response = requests.get(overpass_url, params={'data': overpass_query}, timeout=10)
+        data = response.json()
+        found = []
+        for element in data.get('elements', []):
+            name = element.get('tags', {}).get('name', 'Okänd Bana (OSM)')
+            if 'lat' in element: clat, clon = element['lat'], element['lon']
+            else: clat, clon = element.get('center', {}).get('lat'), element.get('center', {}).get('lon')
+            found.append({"name": name, "lat": clat, "lon": clon})
+        return found
+    except: return []
 
-# AI Setup
+# AI & Vision
 def ask_ai(messages):
     try:
         client = OpenAI(api_key=st.secrets["openai_key"])
@@ -110,38 +124,18 @@ def analyze_image(image_bytes):
     try:
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
         client = OpenAI(api_key=st.secrets["openai_key"])
-        prompt = """
-        Identifiera discen.
-        VIKTIGT OM TYP: Måste vara exakt en av dessa strängar: 'Putter', 'Midrange', 'Fairway Driver', 'Distance Driver'.
-        Svara EXAKT JSON: 
-        {
-            "Modell": "Tillverkare Modell", 
-            "Typ": "Fairway Driver", 
-            "Speed": 7.0, 
-            "Glide": 5.0, 
-            "Turn": 0.0, 
-            "Fade": 2.0
-        }
-        """
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}],
-            max_tokens=300
-        )
+        prompt = "Identifiera discen. VIKTIGT OM TYP: Måste vara exakt en av: 'Putter', 'Midrange', 'Fairway Driver', 'Distance Driver'. Svara EXAKT JSON: {\"Modell\": \"Tillverkare Modell\", \"Typ\": \"Fairway Driver\", \"Speed\": 7.0, \"Glide\": 5.0, \"Turn\": 0.0, \"Fade\": 2.0}"
+        response = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}], max_tokens=300)
         return response.choices[0].message.content
     except: return None
 
-# --- 2. STATE ---
+# --- STATE INIT ---
 if 'data_loaded' not in st.session_state:
-    with st.spinner("Laddar molndata..."):
+    with st.spinner("Startar system..."):
         i, h = load_data_from_sheet()
         st.session_state.inventory = i
         st.session_state.history = h
-    st.session_state.courses = {
-        "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": "Rak"} for x,y in zip(range(1,10), [63,81,48,65,75,55,62,78,52])}},
-        "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
-        "Åbyvallen": {"lat": 57.480, "lon": 12.070, "holes": {str(x):{"l": 70, "p": 3, "shape": "Vänster"} for x in range(1,9)}}
-    }
+        st.session_state.courses = DEFAULT_COURSES.copy() # Starta med interna favoriter
     st.session_state.data_loaded = True
 
 if 'active_players' not in st.session_state: st.session_state.active_players = []
@@ -153,38 +147,31 @@ if 'ai_disc_data' not in st.session_state: st.session_state.ai_disc_data = None
 if 'camera_active' not in st.session_state: st.session_state.camera_active = False
 if 'suggested_pack' not in st.session_state: st.session_state.suggested_pack = []
 if 'warmup_shots' not in st.session_state: st.session_state.warmup_shots = []
-if 'weather_data' not in st.session_state: st.session_state.weather_data = {"temp": 20, "wind": 2, "dir": 0}
+if 'weather_data' not in st.session_state: st.session_state.weather_data = {"temp": 15, "wind": 2, "dir": 0}
+# GPS State
+if 'user_location' not in st.session_state: st.session_state.user_location = {"lat": 57.492, "lon": 12.075, "name": "Kungsbacka"} # Default
 
 # --- 3. LOGIK ---
 def suggest_disc(bag, player, dist, shape, form=1.0, wind_str=0, wind_type="Stilla"):
     pb = bag[(bag["Owner"]==player) & (bag["Status"]=="Bag")]
     if pb.empty: return None, "Tom väska"
-    
     eff_dist = dist / max(form, 0.5)
     target_speed = eff_dist / 10.0
-    
     pb = pb.copy()
-    for c in ["Speed", "Turn", "Fade"]:
-        pb[c] = pd.to_numeric(pb[c], errors='coerce').fillna(0)
+    for c in ["Speed", "Turn", "Fade"]: pb[c] = pd.to_numeric(pb[c], errors='coerce').fillna(0)
     
-    # VIND-JUSTERING
-    advice_suffix = ""
     if "Motvind" in wind_type:
-        pb["Eff_Turn"] = pb["Turn"] - (wind_str * 0.4) 
-        advice_suffix = " (Motvind: Välj Stabil)"
+        pb["Eff_Turn"] = pb["Turn"] - (wind_str * 0.4); advice_suffix = " (Motvind)"
     elif "Medvind" in wind_type:
-        pb["Eff_Turn"] = pb["Turn"] + (wind_str * 0.3)
-        advice_suffix = " (Medvind: Välj Glide/Turn)"
+        pb["Eff_Turn"] = pb["Turn"] + (wind_str * 0.3); advice_suffix = " (Medvind)"
     else:
-        pb["Eff_Turn"] = pb["Turn"]
+        pb["Eff_Turn"] = pb["Turn"]; advice_suffix = ""
 
     pb["Speed_Diff"] = abs(pb["Speed"] - target_speed)
     candidates = pb.copy()
-    
     if eff_dist < 45: candidates = candidates[candidates["Typ"]=="Putter"]
     elif eff_dist < 85: candidates = candidates[candidates["Typ"].isin(["Putter","Midrange"])]
     elif eff_dist < 110: candidates = candidates[candidates["Typ"].isin(["Midrange", "Fairway Driver"])]
-    
     if candidates.empty: candidates = pb
     
     if form < 0.9: candidates["Score"] = candidates["Speed_Diff"] + (candidates["Eff_Turn"] * 0.5)
@@ -200,7 +187,6 @@ def generate_smart_bag(inventory, player, course_name):
     avg_len = np.mean([h["l"] for h in holes.values()])
     all_discs = inventory[inventory["Owner"] == player]
     pack_indices = []
-    
     putters = all_discs[all_discs["Typ"] == "Putter"].sort_values("Speed")
     if not putters.empty: pack_indices.append(putters.iloc[0].name)
     mids = all_discs[all_discs["Typ"] == "Midrange"]
@@ -217,177 +203,158 @@ def generate_smart_bag(inventory, player, course_name):
 # --- 4. UI ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption("🟢 v36.0 Live Weather")
+    st.caption("🟢 v37.0 The Pathfinder")
     
-    # 1. BANA & VÄDER (GPS)
-    course_names = list(st.session_state.courses.keys())
-    # Spara vald bana i session state så den "följer med"
-    if 'selected_course' not in st.session_state: st.session_state.selected_course = course_names[0]
+    # --- GPS & PLATS ---
+    with st.expander("📍 Plats & Navigation", expanded=True):
+        loc_mode = st.radio("Metod", ["Välj från lista", "Manuell"], horizontal=True, label_visibility="collapsed")
+        
+        user_lat, user_lon = st.session_state.user_location["lat"], st.session_state.user_location["lon"]
+        
+        if loc_mode == "Välj från lista":
+            # Snabbval för "Home bases"
+            loc_presets = {
+                "Kungsbacka": (57.492, 12.075),
+                "Göteborg (Skatås)": (57.704, 12.036),
+                "Borås": (57.721, 12.940),
+                "Ale": (57.947, 12.134)
+            }
+            sel_loc = st.selectbox("Jag är nära:", list(loc_presets.keys()))
+            user_lat, user_lon = loc_presets[sel_loc]
+        else:
+            c_lat, c_lon = st.columns(2)
+            user_lat = c_lat.number_input("Lat", value=57.49, format="%.3f")
+            user_lon = c_lon.number_input("Lon", value=12.07, format="%.3f")
+            
+        # Spara uppdaterad plats
+        st.session_state.user_location = {"lat": user_lat, "lon": user_lon, "name": "User"}
+
+        # SORTERA BANOR EFTER AVSTÅND
+        course_list = []
+        for name, data in st.session_state.courses.items():
+            dist = geodesic((user_lat, user_lon), (data["lat"], data["lon"])).km
+            course_list.append((name, dist))
+        
+        # Sortera och skapa lista
+        course_list.sort(key=lambda x: x[1])
+        sorted_names = [x[0] for x in course_list]
+        
+        # Visuell indikator
+        closest = course_list[0]
+        st.caption(f"Närmaste bana: **{closest[0]}** ({closest[1]:.1f} km)")
+        
+        # OSM Scanner Knapp
+        if st.button("🔍 Scanna efter nya banor"):
+            with st.spinner(f"Söker satelliter runt {user_lat}, {user_lon}..."):
+                new_courses = find_courses_via_osm(user_lat, user_lon)
+                count = 0
+                for nc in new_courses:
+                    if nc["name"] not in st.session_state.courses:
+                        # Skapa mall för ny bana
+                        st.session_state.courses[nc["name"]] = {
+                            "lat": nc["lat"], "lon": nc["lon"],
+                            "holes": {str(h): {"l": 100, "p": 3, "shape": "Rak"} for h in range(1, 19)}
+                        }
+                        count += 1
+                if count > 0: st.success(f"Hittade {count} nya banor!"); st.rerun()
+                else: st.warning("Inga nya banor hittades i närheten.")
+
+    # --- BANVAL ---
+    # Använd den sorterade listan
+    sel_course = st.selectbox("Välj Bana (Sorterad)", sorted_names, key="course_selector")
     
-    sel_course = st.selectbox("📍 Välj Bana", course_names, key="course_selector")
-    
-    # Om bana ändras eller väder saknas, hämta nytt
-    if sel_course != st.session_state.selected_course or 'weather_fetched' not in st.session_state:
+    # Hämta väder för vald bana
+    if 'selected_course' not in st.session_state or sel_course != st.session_state.selected_course:
         st.session_state.selected_course = sel_course
         c_loc = st.session_state.courses[sel_course]
         w = get_live_weather(c_loc["lat"], c_loc["lon"])
-        if w:
-            st.session_state.weather_data = {"temp": w["temperature"], "wind": w["windspeed"], "dir": w["winddirection"]}
-            st.session_state.weather_fetched = True
+        if w: st.session_state.weather_data = {"temp": w["temperature"], "wind": w["windspeed"], "dir": w["winddirection"]}
     
-    # Visa Väder
     wd = st.session_state.weather_data
-    wind_arrow = get_wind_direction_str(wd['dir'])
-    
     with st.container(border=True):
         c_w1, c_w2 = st.columns(2)
         c_w1.metric("Temp", f"{wd['temp']}°C")
-        c_w2.metric("Vind", f"{wd['wind']} m/s", wind_arrow)
-        
-        # Hole direction input (Viktigt för Motvind/Medvind)
-        st.markdown("**På Tee:**")
-        hole_wind = st.radio("Vindriktning för Hålet:", ["Stilla", "Motvind", "Medvind", "Sidvind"], index=1 if wd['wind']>4 else 0, horizontal=True)
+        c_w2.metric("Vind", f"{wd['wind']} m/s")
+        hole_wind = st.radio("Vind på tee:", ["Stilla", "Motvind", "Medvind", "Sidvind"], index=1 if wd['wind']>4 else 0, horizontal=True)
 
     st.divider()
     
-    # 2. SPELARE
+    # SPELARE
     all_owners = st.session_state.inventory["Owner"].unique().tolist() if not st.session_state.inventory.empty else []
-    
     new_p = st.text_input("Ny spelare:", placeholder="Namn")
     if st.button("Lägg till") and new_p:
         start_kit = [{"Owner": new_p, "Modell": "Start Putter", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Status": "Bag"}]
         st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
-        save_to_sheet(st.session_state.inventory, "Inventory")
-        st.success("Spelare skapad!"); st.rerun()
+        save_to_sheet(st.session_state.inventory, "Inventory"); st.success("Klar!"); st.rerun()
 
-    active = st.multiselect("Välj Spelare", all_owners, default=st.session_state.active_players)
+    active = st.multiselect("Spelare", all_owners, default=st.session_state.active_players)
     if active != st.session_state.active_players:
         st.session_state.active_players = active
         for p in active:
             if p not in st.session_state.daily_forms: st.session_state.daily_forms[p] = 1.0
         st.rerun()
         
-    if st.button("🔄 Synka Databas"):
-        st.cache_resource.clear()
-        st.rerun()
+    if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
 t1, t2, t3, t4, t5, t6 = st.tabs(["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📊 STATS", "⚙️ ADMIN"])
 
 # TAB 1: WARM-UP
 with t1:
     st.header("🔥 Driving Range")
-    
     if st.session_state.active_players:
-        curr_p = st.selectbox("Kalibrera Spelare:", st.session_state.active_players)
-        
+        curr_p = st.selectbox("Spelare:", st.session_state.active_players)
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
         disc_options = ["Välj Disc"] + p_inv["Modell"].unique().tolist()
-        
         c_in, c_list = st.columns([1, 1])
-        
-        # --- DEL 1: INMATNING ---
         with c_in:
             with st.container(border=True):
-                st.subheader("1. Kasta & Mät")
-                sel_disc_name = st.selectbox("Vilken disc?", disc_options)
-                style = st.radio("Kast-stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
-                
+                st.subheader("Registrera")
+                sel_disc_name = st.selectbox("Disc", disc_options)
+                style = st.radio("Stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
                 c_d, c_s = st.columns(2)
                 kast_len = c_d.number_input("Längd (m)", 0, 200, 50, step=5)
-                kast_sida = c_s.number_input("Sida (m)", -50, 50, 0, step=1, help="-Vänster / +Höger")
-                
-                if st.button("➕ Registrera Kast", type="primary"):
+                kast_sida = c_s.number_input("Sida (m)", -50, 50, 0, step=1, help="-Vä / +Hö")
+                if st.button("➕ Spara Kast", type="primary"):
                     if sel_disc_name != "Välj Disc" and kast_len > 0:
                         d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
-                        st.session_state.warmup_shots.append({
-                            "disc": sel_disc_name,
-                            "style": style,
-                            "len": kast_len,
-                            "side": kast_sida,
-                            "speed": float(d_data["Speed"]),
-                            "turn": float(d_data["Turn"]),
-                            "fade": float(d_data["Fade"])
-                        })
-                        st.success("Kast registrerat!")
-                    else:
-                        st.error("Välj disc och ange längd.")
-
-        # --- DEL 2: LISTA & ANALYS ---
+                        st.session_state.warmup_shots.append({"disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"]), "turn": float(d_data["Turn"]), "fade": float(d_data["Fade"])})
+                        st.success("Sparat!")
         with c_list:
-            st.subheader("2. Dina kast")
             if st.session_state.warmup_shots:
-                shots_df = pd.DataFrame(st.session_state.warmup_shots)
-                st.dataframe(shots_df[["disc", "style", "len", "side"]], hide_index=True, height=150)
-                if st.button("🗑️ Rensa lista"):
-                    st.session_state.warmup_shots = []; st.rerun()
-            else:
-                st.info("Inga kast registrerade än.")
-
-        st.markdown("---")
+                st.dataframe(pd.DataFrame(st.session_state.warmup_shots)[["disc","style","len","side"]], hide_index=True, height=200)
+                if st.button("Rensa"): st.session_state.warmup_shots = []; st.rerun()
         
-        # --- DEL 3: RESULTAT ---
         if st.session_state.warmup_shots:
-            st.subheader("3. Analys & Form")
+            st.divider()
             shots = st.session_state.warmup_shots
-            
-            total_potential_ratio = 0
-            total_tech_side = 0
-            
+            tot_pot = 0; tot_tech = 0
             for s in shots:
-                optimal_dist = max(s["speed"] * 10.0, 40.0) 
-                ratio = s["len"] / optimal_dist
-                total_potential_ratio += ratio
-                
-                req_dist = s["speed"] * 10.0
-                power_ratio = s["len"] / req_dist if req_dist > 0 else 1.0
-                expected_fade = s["fade"]
-                expected_turn = s["turn"] if power_ratio > 0.9 else 0
-                
-                if "Backhand" in s["style"]: fade_dir = -1; turn_dir = 1
-                else: fade_dir = 1; turn_dir = -1
-
-                if power_ratio < 0.8: natural_side = (expected_fade * 3 * fade_dir)
-                else: natural_side = (expected_turn * 2 * turn_dir) + (expected_fade * 2 * fade_dir)
-                
-                total_tech_side += (s["side"] - natural_side)
-
-            avg_form = total_potential_ratio / len(shots)
-            avg_tech_side = total_tech_side / len(shots)
+                opt_dist = max(s["speed"] * 10.0, 40.0); tot_pot += (s["len"] / opt_dist)
+                req = s["speed"]*10.0; p_rat = s["len"]/req if req>0 else 1.0
+                f_dir = -1 if "Backhand" in s["style"] else 1
+                t_dir = -f_dir
+                nat_side = (s["fade"]*3*f_dir) if p_rat<0.8 else (s["turn"]*2*t_dir + s["fade"]*2*f_dir)
+                tot_tech += (s["side"] - nat_side)
+            
+            avg_form = tot_pot / len(shots)
             st.session_state.daily_forms[curr_p] = avg_form
-
-            c_res, c_gr = st.columns(2)
-            with c_res:
-                st.metric("Utnyttjad Potential", f"{int(avg_form*100)}%")
-                st.caption("Jämfört med discens design.")
-                
-                if avg_form > 1.0: st.success("💪 Enorm kraft!")
-                elif avg_form < 0.7: st.warning("⚠️ Låg kraftöverföring.")
-                
-                st.markdown("**Teknik:**")
-                if abs(avg_tech_side) < 7: st.success("✅ Rena träffar!")
-                else: 
-                    dir_txt = "Vänster" if avg_tech_side < 0 else "Höger"
-                    st.warning(f"⚠️ Teknikfel: {dir_txt} om linjen ({int(abs(avg_tech_side))}m).")
-                    
-            with c_gr:
-                fig, ax = plt.subplots(figsize=(4,4))
-                x_vals = [s["side"] for s in shots]
-                y_vals = [s["len"] for s in shots]
-                colors = ['#cc0000' if "Backhand" in s["style"] else '#0066cc' for s in shots]
-                ax.scatter(x_vals, y_vals, c=colors, s=100, alpha=0.7)
-                ax.axvline(0, color='gray', linestyle='--')
-                ax.set_xlim(-40, 40); ax.set_ylim(0, max(y_vals)*1.2)
-                ax.set_title("Träffbild (Röd=BH, Blå=FH)")
-                st.pyplot(fig)
-
-    else: st.info("Välj spelare i menyn.")
+            
+            c1, c2 = st.columns(2)
+            c1.metric("Potential", f"{int(avg_form*100)}%")
+            if abs(tot_tech/len(shots)) < 7: c1.success("✅ Bra linjer!")
+            else: c1.warning("⚠️ Teknikavvikelse")
+            
+            fig, ax = plt.subplots(figsize=(4,3))
+            x=[s["side"] for s in shots]; y=[s["len"] for s in shots]
+            c=['#cc0000' if "Backhand" in s["style"] else '#0066cc' for s in shots]
+            ax.scatter(x,y,c=c,s=80,alpha=0.7); ax.axvline(0,c='gray',ls='--')
+            ax.set_xlim(-40,40); ax.set_ylim(0, max(y)*1.2); c2.pyplot(fig)
+    else: st.info("Välj spelare.")
 
 # TAB 2: RACE
 with t2:
-    # Använd vald bana från sidebar
-    bana = st.session_state.get('selected_course', list(st.session_state.courses.keys())[0])
+    bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
-    
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
@@ -403,7 +370,6 @@ with t2:
         for p in st.session_state.active_players:
             with st.expander(f"{p} - {st.session_state.current_scores[hole][p]}", expanded=True):
                 curr_form = st.session_state.daily_forms.get(p, 1.0)
-                # Använd väderdata från state
                 w_str = st.session_state.weather_data['wind']
                 rec, reason = suggest_disc(st.session_state.inventory, p, inf['l'], inf.get('shape', 'Rak'), curr_form, w_str, hole_wind)
                 if rec is not None: st.success(f"Caddy: {rec['Modell']} ({reason})")
@@ -448,13 +414,11 @@ with t3:
                 st.markdown(reply)
         st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-# TAB 4: UTRUSTNING (LOGISTICS)
+# TAB 4: UTRUSTNING
 with t4:
     st.header("🧳 Logistik-Center")
-    default_owner = st.session_state.active_players[0] if st.session_state.active_players else None
     owner = st.selectbox("Hantera", st.session_state.active_players, index=0) if st.session_state.active_players else None
     
-    # 1. STRATEGEN
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
@@ -466,18 +430,13 @@ with t4:
             if c3.button("Verkställ", type="primary"):
                 st.session_state.inventory.loc[st.session_state.inventory["Owner"]==owner, "Status"] = "Shelf"
                 st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
-                save_to_sheet(st.session_state.inventory, "Inventory")
-                st.session_state.suggested_pack = []
-                st.success("Bagen packad!"); st.rerun()
+                save_to_sheet(st.session_state.inventory, "Inventory"); st.session_state.suggested_pack = []; st.success("Bagen packad!"); st.rerun()
 
-    # 2. LISTOR (Sortering & Delete)
     if owner:
         st.markdown("---")
         sort_mode = st.radio("Sortera på:", ["Speed", "Modell", "Typ"], horizontal=True)
         my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
-        
-        c_shelf = st.container(border=True)
-        c_bag = st.container(border=True)
+        c_shelf = st.container(border=True); c_bag = st.container(border=True)
         
         with c_shelf:
             st.subheader("🏠 Hyllan")
@@ -488,12 +447,9 @@ with t4:
                     c_txt, c_btn, c_del = st.columns([3, 1, 0.5])
                     c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
                     if c_btn.button("➡️", key=f"s2b_{idx}"):
-                        st.session_state.inventory.at[idx, "Status"] = "Bag"
-                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+                        st.session_state.inventory.at[idx, "Status"] = "Bag"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
                     if c_del.button("🗑️", key=f"del_s_{idx}"):
-                        st.session_state.inventory = st.session_state.inventory.drop(idx)
-                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-                        
+                        st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
         with c_bag:
             st.subheader("🎒 Bagen")
             bag = my_inv[my_inv["Status"] == "Bag"].sort_values(sort_mode)
@@ -502,14 +458,11 @@ with t4:
                 for idx, row in bag.iterrows():
                     c_btn, c_txt, c_del = st.columns([1, 3, 0.5])
                     if c_btn.button("⬅️", key=f"b2s_{idx}"):
-                        st.session_state.inventory.at[idx, "Status"] = "Shelf"
-                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+                        st.session_state.inventory.at[idx, "Status"] = "Shelf"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
                     c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
                     if c_del.button("🗑️", key=f"del_b_{idx}"):
-                        st.session_state.inventory = st.session_state.inventory.drop(idx)
-                        save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+                        st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
 
-    # 3. LÄGG TILL
     st.markdown("---")
     with st.expander("➕ Lägg till ny disc"):
         if st.checkbox("Visa Kamera"):
@@ -521,17 +474,14 @@ with t4:
                         json_str = analyze_image(b_data)
                         try:
                             json_str = json_str.replace("```json", "").replace("```", "").strip()
-                            st.session_state.ai_disc_data = json.loads(json_str)
-                            st.success("Hittad!")
+                            st.session_state.ai_disc_data = json.loads(json_str); st.success("Hittad!")
                         except: st.error("Försök igen.")
-
         with st.form("add_cloud"):
             ai_d = st.session_state.ai_disc_data if st.session_state.ai_disc_data else {}
             c1, c2 = st.columns(2)
             mn = c1.text_input("Modell", value=ai_d.get("Modell", ""))
             v_types = ["Putter", "Midrange", "Fairway Driver", "Distance Driver"]
-            r_type = ai_d.get("Typ", "Putter")
-            f_idx = 0
+            r_type = ai_d.get("Typ", "Putter"); f_idx = 0
             for i, vt in enumerate(v_types):
                 if vt.lower() in r_type.lower(): f_idx = i; break
             ty = c2.selectbox("Typ", v_types, index=f_idx)
@@ -540,13 +490,11 @@ with t4:
             gl = c4.number_input("Glide", 0.0, 7.0, float(ai_d.get("Glide", 5.0)))
             tu = c5.number_input("Turn", -5.0, 1.0, float(ai_d.get("Turn", 0.0)))
             fa = c6.number_input("Fade", 0.0, 6.0, float(ai_d.get("Fade", 2.0)))
-            
             if st.form_submit_button("Spara till Hyllan"):
                 nw = {"Owner": owner, "Modell": mn, "Typ": ty, "Speed": sp, "Glide": gl, "Turn": tu, "Fade": fa, "Status": "Shelf"}
                 st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame([nw])], ignore_index=True)
                 save_to_sheet(st.session_state.inventory, "Inventory")
-                st.success(f"{mn} sparad!")
-                st.session_state.ai_disc_data = None; st.rerun()
+                st.success(f"{mn} sparad!"); st.session_state.ai_disc_data = None; st.rerun()
 
 # TAB 5: STATS
 with t5:
@@ -567,12 +515,11 @@ with t5:
 
 # TAB 6: ADMIN
 with t6:
-    st.subheader("⚙️ Admin & Import")
+    st.subheader("⚙️ Admin")
     up = st.file_uploader("Ladda upp CSV", type=['csv'])
     if up and st.button("Kör Import"):
         try:
-            udf = pd.read_csv(up)
-            nd = []
+            udf = pd.read_csv(up); nd = []
             for i, r in udf.iterrows():
                 if r.get('PlayerName')=='Par': continue
                 mn = "Mattias" if "Mattias" in r.get('PlayerName','') else "Jenny" if "Jenny" in r.get('PlayerName','') else r.get('PlayerName')
@@ -583,7 +530,6 @@ with t6:
                         nd.append({"Datum": raw_date, "Bana": r.get('CourseName', 'Unknown'), "Spelare": mn, "Hål": str(hi), "Resultat": int(h_score), "Par": 3, "Disc_Used": "Unknown"})
             if nd:
                 new_hist = pd.concat([st.session_state.history, pd.DataFrame(nd)], ignore_index=True)
-                st.session_state.history = new_hist
-                save_to_sheet(new_hist, "History")
-                st.success(f"Importerade {len(nd)} rader till molnet!")
+                st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
+                st.success(f"Importerade {len(nd)} rader!")
         except Exception as e: st.error(f"Fel: {e}")
