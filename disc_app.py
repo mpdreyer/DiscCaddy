@@ -48,11 +48,20 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST (Backup) ---
+# --- MASTER COURSE LIST ---
 MASTER_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": s} for x,y,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vänster","Rak","Höger","Rak","Vänster","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
+    "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
+    "Åbyvallen": {"lat": 57.480, "lon": 12.070, "holes": {str(x):{"l": 70, "p": 3, "shape": "Vänster"} for x in range(1,9)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
+    "Skatås (Vit)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 120, "p": 3, "shape": "Lång"} for x in range(1,19)}},
+    "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
+    "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog"} for x in range(1,19)}},
+    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 110, "p": 3, "shape": "Lång/Skog"} for x in range(1,19)}},
+    "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
+    "Sankt Hans (Lund)": {"lat": 55.723, "lon": 13.208, "holes": {str(x):{"l": 90, "p": 3, "shape": "Extrem Backe"} for x in range(1,19)}},
+    "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": {str(x):{"l": 70, "p": 3, "shape": "Park"} for x in range(1,19)}},
 }
 
 @st.cache_resource
@@ -66,14 +75,10 @@ def get_gsheet_client():
 def load_data_from_sheet():
     client = get_gsheet_client()
     if not client: return None, None, None, None
-    
     courses_dict = {}
     users_df = pd.DataFrame()
-    
     try:
         sheet = client.open("DiscCaddy_DB")
-        
-        # 1. USERS
         try: ws_users = sheet.worksheet("Users")
         except: 
             ws_users = sheet.add_worksheet("Users", 100, 4)
@@ -82,7 +87,6 @@ def load_data_from_sheet():
         users_df = pd.DataFrame(ws_users.get_all_records())
         if users_df.empty: users_df = pd.DataFrame(columns=["Username", "PIN", "Role", "Active"])
 
-        # 2. INVENTORY
         try: ws_inv = sheet.worksheet("Inventory")
         except: ws_inv = sheet.add_worksheet("Inventory", 100, 10); ws_inv.append_row(["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
         df_inv = pd.DataFrame(ws_inv.get_all_records())
@@ -95,18 +99,15 @@ def load_data_from_sheet():
             if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
             df_inv["Status"] = df_inv["Status"].fillna("Shelf")
 
-        # 3. HISTORY
         try: ws_hist = sheet.worksheet("History")
         except: ws_hist = sheet.add_worksheet("History", 100, 10); ws_hist.append_row(["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
         df_hist = pd.DataFrame(ws_hist.get_all_records())
         if df_hist.empty: df_hist = pd.DataFrame(columns=["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
 
-        # 4. COURSES
         try: ws_courses = sheet.worksheet("Courses")
         except: 
             ws_courses = sheet.add_worksheet("Courses", 100, 5)
             ws_courses.append_row(["Name", "Lat", "Lon", "Holes_JSON"])
-            
         course_data = ws_courses.get_all_records()
         if not course_data: courses_dict = MASTER_COURSES.copy()
         else:
@@ -115,12 +116,8 @@ def load_data_from_sheet():
                     h_json = json.loads(r["Holes_JSON"]) if isinstance(r["Holes_JSON"], str) else r["Holes_JSON"]
                     courses_dict[r["Name"]] = {"lat": float(r["Lat"]), "lon": float(r["Lon"]), "holes": h_json}
                 except: pass
-
         return df_inv, df_hist, courses_dict, users_df
-
-    except Exception as e: 
-        st.error(f"DB Error: {e}")
-        return pd.DataFrame(), pd.DataFrame(), MASTER_COURSES, pd.DataFrame()
+    except Exception as e: st.error(f"DB Error: {e}"); return pd.DataFrame(), pd.DataFrame(), MASTER_COURSES, pd.DataFrame()
 
 def save_to_sheet(df, worksheet_name):
     client = get_gsheet_client()
@@ -144,8 +141,7 @@ def add_course_to_sheet(name, lat, lon, holes_dict):
 def get_lat_lon_from_query(query):
     try:
         url = "https://nominatim.openstreetmap.org/search"
-        params = {'q': query, 'format': 'json', 'limit': 1}
-        headers = {'User-Agent': 'DiscCaddy/1.0'}
+        params = {'q': query, 'format': 'json', 'limit': 1}; headers = {'User-Agent': 'DiscCaddy/1.0'}
         r = requests.get(url, params=params, headers=headers).json()
         if r: return float(r[0]['lat']), float(r[0]['lon'])
     except: pass
@@ -154,7 +150,6 @@ def get_lat_lon_from_query(query):
 def find_courses_via_osm_api(lat, lon, radius=10000):
     try:
         url = "http://overpass-api.de/api/interpreter"
-        # Sök bredare radie (10km) för att hitta banor
         q = f"[out:json];(node['sport'='disc_golf'](around:{radius},{lat},{lon});way['sport'='disc_golf'](around:{radius},{lat},{lon}););out center;"
         r = requests.get(url, params={'data': q}, timeout=15); d = r.json()
         found = []
@@ -291,6 +286,13 @@ if 'data_loaded' not in st.session_state:
         st.session_state.users = u
     st.session_state.data_loaded = True
 
+# --- SAFETY CHECKS (CRASH PREVENTION) ---
+# Ensure current user is valid, else logout
+if st.session_state.get('logged_in') and not st.session_state.users.empty:
+    if st.session_state.current_user not in st.session_state.users["Username"].values:
+        st.session_state.logged_in = False
+        st.session_state.current_user = None
+
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'current_user' not in st.session_state: st.session_state.current_user = None
 if 'user_role' not in st.session_state: st.session_state.user_role = None
@@ -334,7 +336,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v53.0 Community Tracks")
+    st.caption(f"👤 {st.session_state.current_user} | 🟢 v54.0 Crash Control")
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -344,11 +346,9 @@ with st.sidebar:
     
     # 1. BANA & VÄDER
     with st.expander("📍 Välj / Lägg till Bana", expanded=True):
-        # A. Välj befintlig
         course_names = list(st.session_state.courses.keys())
         sel_course = st.selectbox("Aktiv Bana", course_names, key="course_selector")
         
-        # B. Lägg till ny (COMMUNITY TRACKS)
         st.markdown("---")
         st.caption("🌍 Hitta ny bana (OSM)")
         search_q = st.text_input("Sök stad/plats (t.ex. Växjö)")
@@ -356,31 +356,22 @@ with st.sidebar:
         if st.button("🔍 Sök Banor"):
             if search_q:
                 with st.spinner("Skannar satelliter..."):
-                    # 1. Hitta stadens lat/lon
                     lat, lon = get_lat_lon_from_query(search_q)
-                    if lat:
-                        # 2. Hitta banor nära den punkten
-                        st.session_state.found_courses = find_courses_via_osm_api(lat, lon)
-                    else:
-                        st.error("Kunde inte hitta platsen.")
+                    if lat: st.session_state.found_courses = find_courses_via_osm_api(lat, lon)
+                    else: st.error("Kunde inte hitta platsen.")
         
         if st.session_state.found_courses:
             c_opts = [c["name"] for c in st.session_state.found_courses]
             sel_new_c = st.selectbox("Hittade banor:", c_opts)
-            
             if st.button("➕ Lägg till i Databas"):
-                # Hitta data
                 selected_data = next((item for item in st.session_state.found_courses if item["name"] == sel_new_c), None)
                 if selected_data:
-                    # Skapa standardhål
                     std_holes = {str(x): {"l": 100, "p": 3, "shape": "Rak"} for x in range(1, 19)}
                     add_course_to_sheet(selected_data["name"], selected_data["lat"], selected_data["lon"], std_holes)
                     st.success(f"{sel_new_c} tillagd!")
                     st.session_state.found_courses = []
-                    st.cache_resource.clear()
-                    st.rerun()
+                    st.cache_resource.clear(); st.rerun()
 
-    # Väder för vald bana
     if 'selected_course' not in st.session_state or sel_course != st.session_state.selected_course:
         st.session_state.selected_course = sel_course
         c_loc = st.session_state.courses[sel_course]
@@ -396,11 +387,14 @@ with st.sidebar:
 
     st.divider()
     
-    # 2. SPELARE
+    # 2. SPELARE (MED SÄKERHETSSPÄRR)
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
     st.markdown("👥 **Aktivt Team**")
     
-    # Ny spelare (Tillgänglig för alla för att snabbt lägga till vänner)
+    # SÄKERHET: Filtrera bort spöken direkt från sessionen
+    valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
+    st.session_state.active_players = valid_defaults
+    
     with st.expander("Lägg till gäst/vän"):
         new_p = st.text_input("Namn")
         if st.button("Spara") and new_p:
@@ -550,7 +544,6 @@ with current_tab[3]:
     if st.session_state.user_role == "Admin":
         owner = st.selectbox("Hantera", st.session_state.active_players, index=0) if st.session_state.active_players else None
     else: owner = st.session_state.current_user
-    
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
@@ -630,7 +623,6 @@ with current_tab[4]:
     st.header("📈 SCUDERIA TELEMETRY")
     st1, st2, st3 = st.tabs(["✈️ Aero Lab", "🏎️ Race Performance", "🧩 Sector Analysis"])
     df = st.session_state.history
-    
     with st1:
         st.subheader("Aerodynamic Wind Tunnel")
         if st.session_state.active_players:
@@ -657,7 +649,6 @@ with current_tab[4]:
                 if selected_sim_discs: ax.legend(facecolor='#1a1a1a', labelcolor='white')
                 st.pyplot(fig)
         else: st.info("Välj spelare.")
-
     with st2:
         if not df.empty:
             c1, c2 = st.columns(2)
@@ -667,19 +658,15 @@ with current_tab[4]:
             if not dff.empty:
                 st.markdown("**Race Pace Trend**")
                 trend_data = dff.groupby(["Datum", "Spelare"])["Resultat"].mean().reset_index()
-                chart = alt.Chart(trend_data).mark_line(point=True).encode(
-                    x='Datum:T', y='Resultat', color='Spelare', tooltip=['Datum', 'Spelare', 'Resultat']
-                ).interactive()
+                chart = alt.Chart(trend_data).mark_line(point=True).encode(x='Datum:T', y='Resultat', color='Spelare', tooltip=['Datum', 'Spelare', 'Resultat']).interactive()
                 st.altair_chart(chart, use_container_width=True)
             else: st.info("Ingen data.")
         else: st.info("Ingen historik.")
-
     with st3:
         if not df.empty:
             sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
             sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=df["Spelare"].unique())
             hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"].isin(sel_p_sec))]
-            
             if not hdf.empty:
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
                 hole_summary = hdf.groupby(["Hål_Int", "Spelare"])["Resultat"].agg(['mean', 'min']).reset_index()
@@ -691,11 +678,10 @@ with current_tab[4]:
                 st.altair_chart((bar + point).interactive(), use_container_width=True)
             else: st.info("Ingen data.")
 
-# TAB 6: ADMIN
+# TAB 6: HQ (ADMIN)
 if st.session_state.user_role == "Admin":
     with current_tab[5]:
         st.header("⚙️ SCUDERIA HEADQUARTERS")
-        st.subheader("👥 Crew Management")
         users = st.session_state.users
         st.dataframe(users, hide_index=True)
         c_u1, c_u2 = st.columns(2)
@@ -715,9 +701,31 @@ if st.session_state.user_role == "Admin":
             if st.button("🗑️ Radera Användare"):
                 client = get_gsheet_client()
                 ws = client.open("DiscCaddy_DB").worksheet("Users")
-                cell = ws.find(del_user)
-                ws.delete_rows(cell.row)
-                st.success("Raderad!"); st.cache_resource.clear(); st.rerun()
+                try:
+                    cell = ws.find(del_user)
+                    ws.delete_rows(cell.row)
+                    st.success("Raderad!")
+                    st.cache_resource.clear(); st.rerun()
+                except: st.error("Kunde inte hitta användaren.")
+        st.divider()
+        st.subheader("📥 Importera Data")
+        up = st.file_uploader("Ladda upp CSV", type=['csv'])
+        if up and st.button("Kör Import"):
+            try:
+                udf = pd.read_csv(up); nd = []
+                for i, r in udf.iterrows():
+                    if r.get('PlayerName')=='Par': continue
+                    mn = r.get('PlayerName')
+                    raw_date = str(r.get('StartDate', r.get('Date', datetime.now())))[:10]
+                    for hi in range(1, 19):
+                        h_score = r.get(f"Hole{hi}")
+                        if pd.notna(h_score):
+                            nd.append({"Datum": raw_date, "Bana": r.get('CourseName', 'Unknown'), "Spelare": mn, "Hål": str(hi), "Resultat": int(h_score), "Par": 3, "Disc_Used": "Unknown"})
+                if nd:
+                    new_hist = pd.concat([st.session_state.history, pd.DataFrame(nd)], ignore_index=True)
+                    st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
+                    st.success(f"Importerade {len(nd)} rader!")
+            except Exception as e: st.error(f"Fel: {e}")
 
 # TAB 7: ACADEMY
 with current_tab[6]:
