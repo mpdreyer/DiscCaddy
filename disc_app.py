@@ -52,7 +52,16 @@ SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 MASTER_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": s} for x,y,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vänster","Rak","Höger","Rak","Vänster","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
+    "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
+    "Åbyvallen": {"lat": 57.480, "lon": 12.070, "holes": {str(x):{"l": 70, "p": 3, "shape": "Vänster"} for x in range(1,9)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
+    "Skatås (Vit)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 120, "p": 3, "shape": "Lång"} for x in range(1,19)}},
+    "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
+    "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog"} for x in range(1,19)}},
+    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 110, "p": 3, "shape": "Lång/Skog"} for x in range(1,19)}},
+    "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
+    "Sankt Hans (Lund)": {"lat": 55.723, "lon": 13.208, "holes": {str(x):{"l": 90, "p": 3, "shape": "Extrem Backe"} for x in range(1,19)}},
+    "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": {str(x):{"l": 70, "p": 3, "shape": "Park"} for x in range(1,19)}},
 }
 
 @st.cache_resource
@@ -327,7 +336,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v53.1 Telemetry Safety")
+    st.caption(f"👤 {st.session_state.current_user} | 🟢 v54.0 Crew Chief")
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -340,14 +349,12 @@ with st.sidebar:
         sel_course = st.selectbox("Aktiv Bana", course_names, key="course_selector")
         st.caption("🌍 Hitta ny bana (OSM)")
         search_q = st.text_input("Sök stad/plats (t.ex. Växjö)")
-        
         if st.button("🔍 Sök Banor"):
             if search_q:
                 with st.spinner("Skannar satelliter..."):
                     lat, lon = get_lat_lon_from_query(search_q)
                     if lat: st.session_state.found_courses = find_courses_via_osm_api(lat, lon)
                     else: st.error("Kunde inte hitta platsen.")
-        
         if st.session_state.found_courses:
             c_opts = [c["name"] for c in st.session_state.found_courses]
             sel_new_c = st.selectbox("Hittade banor:", c_opts)
@@ -374,6 +381,20 @@ with st.sidebar:
         hole_wind = st.radio("Vind på tee:", ["Stilla", "Mot", "Med", "Sida"], horizontal=True)
 
     st.divider()
+    
+    # 2. SPELARE (MED SÄKERHETSSPÄRR)
+    all_owners = st.session_state.inventory["Owner"].unique().tolist()
+    st.markdown("👥 **Aktivt Team**")
+    
+    # SÄKERHET: Filtrera bort spöken direkt från sessionen
+    valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
+    st.session_state.active_players = valid_defaults
+    
+    active = st.multiselect("Välj förare", all_owners, default=st.session_state.active_players)
+    if active != st.session_state.active_players:
+        st.session_state.active_players = active
+        st.rerun()
+        
     if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
 # --- TABS ---
@@ -430,7 +451,6 @@ with current_tab[0]:
 with current_tab[1]:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
-    
     st.subheader("🏁 Race Day")
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
     race_players = st.multiselect("Lägg till motståndare i loppet:", [o for o in all_owners if o != st.session_state.current_user], default=[])
@@ -445,18 +465,15 @@ with current_tab[1]:
     with col_s:
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
-        
         for p in active_racers:
             if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
-
         for p in active_racers:
             with st.expander(f"🏎️ {p} (Score: {st.session_state.current_scores[hole][p]})", expanded=True):
                 hist_df = st.session_state.history
                 if not hist_df.empty:
                     p_hist = hist_df[(hist_df["Spelare"]==p) & (hist_df["Bana"]==bana) & (hist_df["Hål"]==hole)]
                     if not p_hist.empty: st.caption(f"👻 Historik: Snitt {p_hist['Resultat'].mean():.1f}")
-                
                 if p == st.session_state.current_user:
                     with st.container(border=True):
                         form = st.session_state.daily_forms.get(p, 1.0)
@@ -471,18 +488,15 @@ with current_tab[1]:
                                 advice = get_ai_caddy_advice(p, p_bag, inf, st.session_state.weather_data, situation, obstacles, form)
                                 st.session_state.hole_advice[f"{hole}_{p}"] = advice
                         if f"{hole}_{p}" in st.session_state.hole_advice: st.info(st.session_state.hole_advice[f"{hole}_{p}"])
-
                 c1, c2, c3 = st.columns([1,2,1])
                 if c1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
                 c2.markdown(f"<h2 style='text-align:center'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
                 if c3.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
-                
                 p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
                 bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
                 all_discs = p_inv["Modell"].tolist()
                 opts = ["Välj Disc"] + (bag_discs if bag_discs else all_discs)
                 st.session_state.selected_discs[hole][p] = st.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
-
     if st.button("🏁 SPARA RUNDA", type="primary"):
         new_rows = []
         d = datetime.now().strftime("%Y-%m-%d")
@@ -597,7 +611,6 @@ with current_tab[4]:
     st.header("📈 SCUDERIA TELEMETRY")
     st1, st2, st3 = st.tabs(["✈️ Aero Lab", "🏎️ Race Performance", "🧩 Sector Analysis"])
     df = st.session_state.history
-    
     with st1:
         st.subheader("Aerodynamic Wind Tunnel")
         if st.session_state.active_players:
@@ -623,12 +636,10 @@ with current_tab[4]:
                 ax.grid(color='gray', linestyle=':', alpha=0.3)
                 if selected_sim_discs: ax.legend(facecolor='#1a1a1a', labelcolor='white')
                 st.pyplot(fig)
-        else: st.info("Logga in för att se dina discar.")
-
+        else: st.info("Välj spelare.")
     with st2:
         if not df.empty:
             c1, c2 = st.columns(2)
-            # SAFETY CHECK: Only check defaults existing in DF
             valid_p = [p for p in [st.session_state.current_user] if p in df["Spelare"].unique()]
             sel_p_stats = c1.multiselect("Förare (Jämför)", df["Spelare"].unique(), default=valid_p)
             sel_c_stats = c2.selectbox("Grand Prix", df["Bana"].unique())
@@ -640,15 +651,12 @@ with current_tab[4]:
                 st.altair_chart(chart, use_container_width=True)
             else: st.info("Ingen data.")
         else: st.info("Ingen historik.")
-
     with st3:
         if not df.empty:
             sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
-            # SAFETY CHECK
             valid_p_sec = [p for p in [st.session_state.current_user] if p in df["Spelare"].unique()]
             sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=valid_p_sec)
             hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"].isin(sel_p_sec))]
-            
             if not hdf.empty:
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
                 hole_summary = hdf.groupby(["Hål_Int", "Spelare"])["Resultat"].agg(['mean', 'min']).reset_index()
@@ -713,29 +721,27 @@ with current_tab[5]:
 if st.session_state.user_role == "Admin":
     with current_tab[6]:
         st.header("⚙️ SCUDERIA HEADQUARTERS")
-        
         st.subheader("👥 Crew Management")
         users = st.session_state.users
         st.dataframe(users, hide_index=True)
         
-        c_u1, c_u2 = st.columns(2)
-        with c_u1:
+        # 1. NEW USER CREATION (Top)
+        with st.expander("➕ Registrera Ny Förare", expanded=False):
             with st.form("new_user_hq"):
                 st.markdown("**Skapa Nytt Konto**")
                 nu_name = st.text_input("Namn")
                 nu_pin = st.text_input("PIN (4 siffror)", max_chars=4)
                 nu_role = st.selectbox("Roll", ["Player", "Admin"])
                 nu_mun = st.text_input("Hemkommun (t.ex. Kungsbacka)")
-                
-                if st.form_submit_button("Skapa Användare & Scanna"):
+                if st.form_submit_button("Skapa Förare"):
                     client = get_gsheet_client()
                     ws = client.open("DiscCaddy_DB").worksheet("Users")
                     ws.append_row([nu_name, nu_pin, nu_role, "True", nu_mun])
-                    
+                    # Starter Kit
                     start_kit = [{"Owner": nu_name, "Modell": "Start Putter", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Status": "Bag"}]
                     st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
                     save_to_sheet(st.session_state.inventory, "Inventory")
-                    
+                    # Auto Scan
                     if nu_mun:
                         lat, lon = get_lat_lon_from_query(nu_mun)
                         if lat:
@@ -744,21 +750,47 @@ if st.session_state.user_role == "Admin":
                                 std_holes = {str(x): {"l": 100, "p": 3, "shape": "Rak"} for x in range(1, 19)}
                                 add_course_to_sheet(nc["name"], nc["lat"], nc["lon"], std_holes)
                             st.success(f"Användare {nu_name} skapad! Hittade {len(new_courses)} banor i {nu_mun}.")
-                        else: st.warning("Användare skapad, men kunde inte hitta kommunen för bankartläggning.")
-                    
+                        else: st.warning("Kunde inte hitta kommun.")
                     st.cache_resource.clear(); st.rerun()
+
+        # 2. EDIT / DELETE USER
+        st.markdown("---")
+        st.subheader("🛠️ Redigera / Ta Bort")
         
-        with c_u2:
-            del_user = st.selectbox("Ta bort användare", users["Username"].tolist())
-            if st.button("🗑️ Radera Användare"):
-                client = get_gsheet_client()
-                ws = client.open("DiscCaddy_DB").worksheet("Users")
-                try:
-                    cell = ws.find(del_user)
+        target_user_name = st.selectbox("Välj användare att hantera", users["Username"].tolist())
+        
+        if target_user_name:
+            user_data = users[users["Username"] == target_user_name].iloc[0]
+            
+            with st.form("edit_user_form"):
+                c1, c2, c3 = st.columns(3)
+                new_pin = c1.text_input("Ny PIN", value=str(user_data["PIN"]))
+                new_role = c2.selectbox("Ny Roll", ["Player", "Admin"], index=0 if user_data["Role"]=="Player" else 1)
+                new_mun = c3.text_input("Ny Kommun", value=str(user_data["Municipality"]))
+                
+                col_save, col_del = st.columns([3, 1])
+                
+                # SAVE UPDATE
+                if col_save.form_submit_button("💾 Spara Ändringar"):
+                    client = get_gsheet_client()
+                    ws = client.open("DiscCaddy_DB").worksheet("Users")
+                    cell = ws.find(target_user_name)
+                    # Update row (Name, PIN, Role, Active, Mun)
+                    ws.update(f"A{cell.row}:E{cell.row}", [[target_user_name, new_pin, new_role, "True", new_mun]])
+                    st.success("Uppdaterad!")
+                    st.cache_resource.clear(); st.rerun()
+            
+            # SEPARATE DELETE BUTTON (Safe)
+            if target_user_name != "Admin":
+                if st.button(f"🗑️ Radera {target_user_name}", type="primary"):
+                    client = get_gsheet_client()
+                    ws = client.open("DiscCaddy_DB").worksheet("Users")
+                    cell = ws.find(target_user_name)
                     ws.delete_rows(cell.row)
                     st.success("Raderad!")
                     st.cache_resource.clear(); st.rerun()
-                except: st.error("Kunde inte hitta användaren.")
+            else:
+                st.caption("🔒 Admin-kontot kan inte raderas.")
 
         st.divider()
         st.subheader("📥 Importera Data")
