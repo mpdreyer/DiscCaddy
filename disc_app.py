@@ -32,15 +32,22 @@ st.markdown("""
     .stApp { background-color: #b80000; color: #ffffff; }
     h1, h2, h3, h4 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
     section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
-    .stat-card { background-color: #1a1a1a; border-left: 5px solid #fff200; padding: 15px; border-radius: 6px; box-shadow: 3px 3px 10px rgba(0,0,0,0.5); margin-bottom: 10px; color: white; }
-    .stat-value { font-size: 26px; font-weight: bold; color: #ffffff; }
-    .stat-label { font-size: 13px; text-transform: uppercase; color: #fff200; letter-spacing: 1px; font-weight: bold;}
+    
+    /* Engineer Console Styling */
+    .engineer-msg {
+        background-color: #111111;
+        border-left: 4px solid #fff200;
+        padding: 15px;
+        margin-top: 10px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+    }
+    .engineer-title { color: #fff200; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 8px;}
+    
     div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
     div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div { background-color: #fff200 !important; color: #000000 !important; border-color: #000000 !important; font-weight: bold; }
     input, .stSelectbox div[data-baseweb="select"] span { color: #000000 !important; }
-    ul[data-baseweb="menu"] { background-color: #fff200 !important; }
-    ul[data-baseweb="menu"] li { color: #000000 !important; font-weight: bold; }
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
     </style>
 """, unsafe_allow_html=True)
@@ -52,16 +59,7 @@ SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 MASTER_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": s} for x,y,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vänster","Rak","Höger","Rak","Vänster","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
-    "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
-    "Åbyvallen": {"lat": 57.480, "lon": 12.070, "holes": {str(x):{"l": 70, "p": 3, "shape": "Vänster"} for x in range(1,9)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
-    "Skatås (Vit)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 120, "p": 3, "shape": "Lång"} for x in range(1,19)}},
-    "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
-    "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog"} for x in range(1,19)}},
-    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 110, "p": 3, "shape": "Lång/Skog"} for x in range(1,19)}},
-    "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
-    "Sankt Hans (Lund)": {"lat": 55.723, "lon": 13.208, "holes": {str(x):{"l": 90, "p": 3, "shape": "Extrem Backe"} for x in range(1,19)}},
-    "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": {str(x):{"l": 70, "p": 3, "shape": "Park"} for x in range(1,19)}},
 }
 
 @st.cache_resource
@@ -209,26 +207,55 @@ def analyze_video_form(video_bytes):
         return "Kunde inte läsa videon."
     except Exception as e: return f"Video Error: {e}"
 
-def get_tactical_advice(player, bag_df, dist, weather, situation, obstacles, image_bytes=None):
-    bag_str = ", ".join([f"{r['Modell']} ({r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in bag_df.iterrows()])
-    obs_str = ', '.join(obstacles)
-    prompt = f"Caddy-råd: Spelare {player}, Bag: {bag_str}. Läge: {situation} ({dist}m till korg). Hinder: {obs_str}. Vind: {weather['wind']}m/s. Prioritera precision. Svara kort: Disc, Linje, Tanke."
-    msgs = [{"role": "system", "content": "Elit-caddy."}]
-    if image_bytes:
-        b64 = base64.b64encode(image_bytes).decode('utf-8')
-        content = [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]
-    else: content = prompt
-    msgs.append({"role": "user", "content": content})
-    return ask_ai(msgs)
-
-def get_ai_caddy_advice(player, bag_df, hole_info, weather, situation, obstacles, form_factor=1.0):
+# --- THE RACE ENGINEER (STRATEGIST) ---
+def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist_left, user_notes, image_bytes=None, form_factor=1.0):
     race_bag = bag_df[bag_df["Status"] == "Bag"]
     if race_bag.empty: race_bag = bag_df
+    
     bag_str = ", ".join([f"{r['Modell']} ({r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in race_bag.iterrows()])
-    obs_str = ', '.join(obstacles)
-    prompt = f"Elit-Caddy. SPELARE: {player} (Form: {int(form_factor*100)}%). HÅL: {hole_info['l']}m, Par {hole_info['p']}. LÄGE: {situation}, HINDER: {obs_str}. VÄDER: {weather['wind']}m/s. BAG: {bag_str}. UPPGIFT: Välj BÄSTA disc. Rekommendera kasttyp (BH/FH/Roller) och linje. Motivera."
-    msgs = [{"role": "system", "content": "Professionell caddy."}]
-    msgs.append({"role": "user", "content": prompt})
+    
+    system_prompt = """
+    Du är en Elit-Discgolf Strateg & Race Engineer för Scuderia Wonka.
+    Din uppgift är att analysera telemetri, väder och banprofil för att ge den optimala spellinjen.
+    Du måste ta hänsyn till spelarens dagsform (Power Level).
+    
+    Svara kort, koncist och auktoritärt (som en F1-ingenjör på radion).
+    Strukturera svaret i denna HTML-liknande stil (använd Markdown):
+    
+    <div class="engineer-msg">
+    <div class="engineer-title">STRATEGI</div>
+    <b>ANALYS:</b> [Kort analys av läget/vinden/formen]<br>
+    <b>PRIMÄRT VAL:</b> [Disc] - [Kasttyp] (t.ex. Backhand Hyzer)<br>
+    <b>EXECUTION:</b> [Instruktion för kastet, sikte, kraft]<br>
+    </div>
+    """
+    
+    user_content = f"""
+    DATA TELEMETRI:
+    - Spelare: {player}
+    - Dagsform (Power): {int(form_factor*100)}% (Om <100%, rekommendera mer understabilt eller långsammare discar)
+    - Hål Info: Par {hole_info['p']}, Total Längd {hole_info['l']}m, Form: {hole_info['shape']}
+    - Nuvarande Läge: {situation}
+    - Avstånd kvar: {dist_left}m
+    - Väder: {weather['wind']} m/s, Temp {weather['temp']}C
+    - Förar-Feedback: {user_notes if user_notes else "Ingen specifik notering."}
+    
+    BAG INVENTORY:
+    {bag_str}
+    """
+    
+    msgs = [{"role": "system", "content": system_prompt}]
+    
+    content_payload = [{"type": "text", "text": user_content}]
+    
+    # Add vision if image exists
+    if image_bytes:
+        b64 = base64.b64encode(image_bytes).decode('utf-8')
+        content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        content_payload.append({"type": "text", "text": "ANALYSIS OF VISUALS: Identifiera hinder, korgens placering och höjdskillnader från bilden."})
+        
+    msgs.append({"role": "user", "content": content_payload})
+    
     return ask_ai(msgs)
 
 def generate_smart_bag(inventory, player, course_name):
@@ -310,7 +337,7 @@ if 'user_location' not in st.session_state: st.session_state.user_location = {"l
 if 'hole_advice' not in st.session_state: st.session_state.hole_advice = {}
 if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 if 'found_courses' not in st.session_state: st.session_state.found_courses = []
-if 'managed_user' not in st.session_state: st.session_state.managed_user = None # För Admin
+if 'managed_user' not in st.session_state: st.session_state.managed_user = None
 
 # --- LOGIN SCREEN ---
 if not st.session_state.logged_in:
@@ -337,7 +364,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v55.0 UAT Ready")
+    st.caption(f"👤 {st.session_state.current_user} | 🟢 v57.0 Race Engineer")
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -348,23 +375,20 @@ with st.sidebar:
     # --- ADMIN: IMPERSONATION TOOL ---
     if st.session_state.user_role == "Admin":
         all_owners = st.session_state.inventory["Owner"].unique().tolist()
-        # Default to self if not set
         if not st.session_state.managed_user: st.session_state.managed_user = st.session_state.current_user
-        
-        # Admin selects who to manage (Inventory/Stats focus)
-        managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=all_owners.index(st.session_state.managed_user) if st.session_state.managed_user in all_owners else 0)
+        if st.session_state.managed_user not in all_owners:
+            st.session_state.managed_user = all_owners[0] if all_owners else st.session_state.current_user
+        managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=all_owners.index(st.session_state.managed_user))
         st.session_state.managed_user = managed
     else:
-        # Regular user always manages self
         st.session_state.managed_user = st.session_state.current_user
 
     # --- EVERYONE: TEAM SELECTION (FOR RACE/WARMUP) ---
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
-    # Remove ghosts
     valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
+    if not valid_defaults and st.session_state.current_user in all_owners: valid_defaults = [st.session_state.current_user]
     
     st.markdown("👥 **Team för dagen (Race/Warmup)**")
-    # Multiselect for grouping up
     active_team = st.multiselect("Lägg till kompisar:", all_owners, default=valid_defaults)
     
     if active_team != st.session_state.active_players:
@@ -378,27 +402,27 @@ with st.sidebar:
         course_names = list(st.session_state.courses.keys())
         sel_course = st.selectbox("Aktiv Bana", course_names, key="course_selector")
         
-        if st.session_state.user_role == "Admin" or True: # Allow everyone to find courses
-            st.caption("🌍 Hitta ny bana (OSM)")
-            search_q = st.text_input("Sök stad/plats (t.ex. Växjö)")
-            if st.button("🔍 Sök Banor"):
-                if search_q:
-                    with st.spinner("Skannar satelliter..."):
-                        lat, lon = get_lat_lon_from_query(search_q)
-                        if lat: st.session_state.found_courses = find_courses_via_osm_api(lat, lon)
-                        else: st.error("Kunde inte hitta platsen.")
-            
-            if st.session_state.found_courses:
-                c_opts = [c["name"] for c in st.session_state.found_courses]
-                sel_new_c = st.selectbox("Hittade banor:", c_opts)
-                if st.button("➕ Lägg till i Databas"):
-                    selected_data = next((item for item in st.session_state.found_courses if item["name"] == sel_new_c), None)
-                    if selected_data:
-                        std_holes = {str(x): {"l": 100, "p": 3, "shape": "Rak"} for x in range(1, 19)}
-                        add_course_to_sheet(selected_data["name"], selected_data["lat"], selected_data["lon"], std_holes)
-                        st.success(f"{sel_new_c} tillagd!")
-                        st.session_state.found_courses = []
-                        st.cache_resource.clear(); st.rerun()
+        st.caption("🌍 Hitta ny bana (OSM)")
+        search_q = st.text_input("Sök stad/plats (t.ex. Växjö)")
+        
+        if st.button("🔍 Sök Banor"):
+            if search_q:
+                with st.spinner("Skannar satelliter..."):
+                    lat, lon = get_lat_lon_from_query(search_q)
+                    if lat: st.session_state.found_courses = find_courses_via_osm_api(lat, lon)
+                    else: st.error("Kunde inte hitta platsen.")
+        
+        if st.session_state.found_courses:
+            c_opts = [c["name"] for c in st.session_state.found_courses]
+            sel_new_c = st.selectbox("Hittade banor:", c_opts)
+            if st.button("➕ Lägg till i Databas"):
+                selected_data = next((item for item in st.session_state.found_courses if item["name"] == sel_new_c), None)
+                if selected_data:
+                    std_holes = {str(x): {"l": 100, "p": 3, "shape": "Rak"} for x in range(1, 19)}
+                    add_course_to_sheet(selected_data["name"], selected_data["lat"], selected_data["lon"], std_holes)
+                    st.success(f"{sel_new_c} tillagd!")
+                    st.session_state.found_courses = []
+                    st.cache_resource.clear(); st.rerun()
 
     if 'selected_course' not in st.session_state or sel_course != st.session_state.selected_course:
         st.session_state.selected_course = sel_course
@@ -413,6 +437,7 @@ with st.sidebar:
         c2.metric("Vind", f"{wd['wind']} m/s")
         hole_wind = st.radio("Vind på tee:", ["Stilla", "Mot", "Med", "Sida"], horizontal=True)
 
+    st.divider()
     if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
 # --- TABS ---
@@ -425,10 +450,7 @@ with current_tab[0]:
     st.header("🔥 Driving Range")
     
     if st.session_state.active_players:
-        # SELECT PLAYER FOR THIS THROW
         curr_thrower = st.selectbox("Vem kastar?", st.session_state.active_players)
-        
-        # Get inv for thrower
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_thrower]
         bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
         shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
@@ -462,7 +484,6 @@ with current_tab[0]:
             
     if st.session_state.warmup_shots:
         st.divider()
-        # Calculate form for ALL players in session
         for p in st.session_state.active_players:
             p_shots = [s for s in st.session_state.warmup_shots if s['player'] == p]
             if p_shots:
@@ -471,42 +492,34 @@ with current_tab[0]:
                 avg_form = tot_pot / len(p_shots)
                 st.session_state.daily_forms[p] = avg_form
         
-        # Display Stats
         st.subheader("📊 Session Stats")
         cols = st.columns(len(st.session_state.active_players))
         for i, p in enumerate(st.session_state.active_players):
             f = st.session_state.daily_forms.get(p, 0)
             if f > 0: cols[i].metric(p, f"Form: {int(f*100)}%")
 
-        # Shared Graph
         fig, ax = plt.subplots(figsize=(6,3))
         shots = st.session_state.warmup_shots
-        # Color map
         colors = plt.cm.rainbow(np.linspace(0, 1, len(st.session_state.active_players)))
         p_map = {p: c for p, c in zip(st.session_state.active_players, colors)}
         
         for s in shots:
             ax.scatter(s["side"], s["len"], color=p_map.get(s["player"], 'white'), s=100, alpha=0.8, label=s["player"])
-        
         ax.axvline(0, c='white', ls='--')
         ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
         ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
-        
-        # Fix legend (remove duplicates)
         handles, labels = ax.get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
         ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
-        
         c2.pyplot(fig)
     else: st.info("Lägg till spelare i menyn till vänster.")
 
-# TAB 2: RACE
+# TAB 2: RACE (ENGINEER EDITION)
 with current_tab[1]:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
     
-    st.subheader("🏁 Race Day")
-    # Uses active_players from sidebar
+    st.subheader(f"🏁 Race Day: {bana}")
     active_racers = st.session_state.active_players
     
     col_n, col_s = st.columns([1, 2])
@@ -515,7 +528,9 @@ with current_tab[1]:
         hole = st.selectbox("Hål", holes)
         inf = c_data["holes"][hole]
         st.metric(f"Hål {hole}", f"{inf['l']}m", f"Par {inf['p']}"); st.caption(inf.get('shape', 'Rak'))
+    
     with col_s:
+        # Init scores
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
         
@@ -523,31 +538,80 @@ with current_tab[1]:
             if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
 
+        # --- PLAYER COCKPITS ---
         for p in active_racers:
             with st.expander(f"🏎️ {p} (Score: {st.session_state.current_scores[hole][p]})", expanded=True):
-                # Caddy Advice Button
-                if st.button(f"🧠 AI ({p})", key=f"ai_btn_{hole}_{p}"):
-                    p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
-                    form = st.session_state.daily_forms.get(p, 1.0)
-                    # Simplified context for button click speed
-                    with st.spinner("..."):
-                        advice = get_ai_caddy_advice(p, p_bag, inf, st.session_state.weather_data, "Tee", [], form)
-                        st.session_state.hole_advice[f"{hole}_{p}"] = advice
                 
-                if f"{hole}_{p}" in st.session_state.hole_advice: st.info(st.session_state.hole_advice[f"{hole}_{p}"])
+                # 1. TELEMETRY DISPLAY (GHOST)
+                c_ghost, c_ai = st.columns([1, 2])
+                with c_ghost:
+                    hist_df = st.session_state.history
+                    avg_score = "-"
+                    delta = ""
+                    if not hist_df.empty:
+                        p_hist = hist_df[(hist_df["Spelare"]==p) & (hist_df["Bana"]==bana) & (hist_df["Hål"]==hole)]
+                        if not p_hist.empty: 
+                            avg = p_hist['Resultat'].mean()
+                            avg_score = f"{avg:.1f}"
+                            diff = avg - inf['p']
+                            delta = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
+                    
+                    st.markdown(f"""
+                        <div class="metric-box">
+                            <div class="metric-label">HISTORIK</div>
+                            <div class="metric-value">{avg_score}</div>
+                            <div class="metric-sub">{delta} vs Par</div>
+                        </div>
+                    """, unsafe_allow_html=True)
 
-                c1, c2, c3 = st.columns([1,2,1])
-                if c1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
-                c2.markdown(f"<h2 style='text-align:center'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
-                if c3.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
+                # 2. RACE ENGINEER STRATEGY STATION (Inputs & Output)
+                with c_ai:
+                    with st.container(border=True):
+                        st.markdown("**📻 TEAM RADIO (STRATEGY)**")
+                        
+                        # Dynamic Form (Telemetry)
+                        form = st.session_state.daily_forms.get(p, 1.0)
+                        if form != 1.0:
+                            st.caption(f"⚠️ Telemetri: Dagsform är {int(form*100)}% power.")
+                        
+                        c_sit1, c_sit2 = st.columns(2)
+                        situation = c_sit1.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", label_visibility="collapsed")
+                        dist_left = c_sit2.slider("Avstånd (m)", 0, 300, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
+                        
+                        user_notes = st.text_input("Förar-Feedback (t.ex. 'Träd höger', 'Uppför')", key=f"note_{hole}_{p}")
+                        
+                        # CAMERA
+                        use_cam = st.checkbox("📸 Aktivera 'Helmet Cam'", key=f"cam_tog_{hole}_{p}")
+                        img_data = None
+                        if use_cam:
+                            img_file = st.camera_input("Ta bild på banan", key=f"ci_{hole}_{p}")
+                            if img_file: img_data = img_file.getvalue()
+
+                        if st.button(f"🔊 Request Strategy ({p})", key=f"ai_btn_{hole}_{p}", type="primary"):
+                            p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
+                            with st.spinner("Race Engineer analyzing data..."):
+                                advice = get_race_engineer_advice(p, p_bag, inf, st.session_state.weather_data, situation, dist_left, user_notes, img_data, form)
+                                st.session_state.hole_advice[f"{hole}_{p}"] = advice
+                        
+                        if f"{hole}_{p}" in st.session_state.hole_advice:
+                            st.markdown(st.session_state.hole_advice[f"{hole}_{p}"], unsafe_allow_html=True)
+
+                st.divider()
+                
+                # 4. EXECUTION (SCORE & DISC)
+                c_sc1, c_sc2, c_disc = st.columns([1, 1, 3])
+                if c_sc1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
+                c_sc2.markdown(f"<h2 style='text-align:center; color:white;'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
+                if c_sc2.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
                 
                 p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
                 bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
                 all_discs = p_inv["Modell"].tolist()
                 opts = ["Välj Disc"] + (bag_discs if bag_discs else all_discs)
-                st.session_state.selected_discs[hole][p] = st.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
+                st.session_state.selected_discs[hole][p] = c_disc.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
 
-    if st.button("🏁 SPARA RUNDA", type="primary"):
+    st.markdown("---")
+    if st.button("🏁 SPARA RUNDA & KLIV AV BANAN", type="primary"):
         new_rows = []
         d = datetime.now().strftime("%Y-%m-%d")
         for h, scores in st.session_state.current_scores.items():
@@ -557,7 +621,7 @@ with current_tab[1]:
         new_df = pd.DataFrame(new_rows)
         st.session_state.history = pd.concat([st.session_state.history, new_df], ignore_index=True)
         save_to_sheet(st.session_state.history, "History")
-        st.balloons(); st.success("Sparat!"); st.session_state.current_scores = {}
+        st.balloons(); st.success("Loppet sparat i historiken!"); st.session_state.current_scores = {}
 
 # TAB 3: AI-CADDY
 with current_tab[2]:
@@ -580,7 +644,6 @@ with current_tab[2]:
 
 # TAB 4: UTRUSTNING
 with current_tab[3]:
-    # USE MANAGED USER (Set in Sidebar)
     target_p = st.session_state.managed_user
     st.header(f"🧳 Logistik: {target_p}")
     
