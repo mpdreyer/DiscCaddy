@@ -52,16 +52,7 @@ SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 MASTER_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": y, "p": 3, "shape": s} for x,y,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vänster","Rak","Höger","Rak","Vänster","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
-    "Lygnevi Sätila": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 100, "p": 3, "shape": "Rak"} for x in range(1,19)}},
-    "Åbyvallen": {"lat": 57.480, "lon": 12.070, "holes": {str(x):{"l": 70, "p": 3, "shape": "Vänster"} for x in range(1,9)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
-    "Skatås (Vit)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 120, "p": 3, "shape": "Lång"} for x in range(1,19)}},
-    "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
-    "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog"} for x in range(1,19)}},
-    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 110, "p": 3, "shape": "Lång/Skog"} for x in range(1,19)}},
-    "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
-    "Sankt Hans (Lund)": {"lat": 55.723, "lon": 13.208, "holes": {str(x):{"l": 90, "p": 3, "shape": "Extrem Backe"} for x in range(1,19)}},
-    "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": {str(x):{"l": 70, "p": 3, "shape": "Park"} for x in range(1,19)}},
 }
 
 @st.cache_resource
@@ -79,14 +70,21 @@ def load_data_from_sheet():
     users_df = pd.DataFrame()
     try:
         sheet = client.open("DiscCaddy_DB")
+        
+        # 1. USERS (Added Municipality)
         try: ws_users = sheet.worksheet("Users")
         except: 
-            ws_users = sheet.add_worksheet("Users", 100, 4)
-            ws_users.append_row(["Username", "PIN", "Role", "Active"])
-            ws_users.append_row(["Admin", "1234", "Admin", "True"]) 
-        users_df = pd.DataFrame(ws_users.get_all_records())
-        if users_df.empty: users_df = pd.DataFrame(columns=["Username", "PIN", "Role", "Active"])
+            ws_users = sheet.add_worksheet("Users", 100, 5)
+            ws_users.append_row(["Username", "PIN", "Role", "Active", "Municipality"])
+            ws_users.append_row(["Admin", "1234", "Admin", "True", "Kungsbacka"]) 
+        
+        users_data = ws_users.get_all_records()
+        users_df = pd.DataFrame(users_data)
+        # Migration check if Municipality is missing
+        if not users_df.empty and "Municipality" not in users_df.columns:
+            users_df["Municipality"] = "Unknown"
 
+        # 2. INVENTORY
         try: ws_inv = sheet.worksheet("Inventory")
         except: ws_inv = sheet.add_worksheet("Inventory", 100, 10); ws_inv.append_row(["Owner", "Modell", "Typ", "Speed", "Glide", "Turn", "Fade", "Status"])
         df_inv = pd.DataFrame(ws_inv.get_all_records())
@@ -99,11 +97,13 @@ def load_data_from_sheet():
             if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
             df_inv["Status"] = df_inv["Status"].fillna("Shelf")
 
+        # 3. HISTORY
         try: ws_hist = sheet.worksheet("History")
         except: ws_hist = sheet.add_worksheet("History", 100, 10); ws_hist.append_row(["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
         df_hist = pd.DataFrame(ws_hist.get_all_records())
         if df_hist.empty: df_hist = pd.DataFrame(columns=["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
 
+        # 4. COURSES
         try: ws_courses = sheet.worksheet("Courses")
         except: 
             ws_courses = sheet.add_worksheet("Courses", 100, 5)
@@ -147,7 +147,7 @@ def get_lat_lon_from_query(query):
     except: pass
     return None, None
 
-def find_courses_via_osm_api(lat, lon, radius=10000):
+def find_courses_via_osm_api(lat, lon, radius=15000): # Increased radius for better hit rate
     try:
         url = "http://overpass-api.de/api/interpreter"
         q = f"[out:json];(node['sport'='disc_golf'](around:{radius},{lat},{lon});way['sport'='disc_golf'](around:{radius},{lat},{lon}););out center;"
@@ -286,8 +286,7 @@ if 'data_loaded' not in st.session_state:
         st.session_state.users = u
     st.session_state.data_loaded = True
 
-# --- SAFETY CHECKS (CRASH PREVENTION) ---
-# Ensure current user is valid, else logout
+# Safety Check
 if st.session_state.get('logged_in') and not st.session_state.users.empty:
     if st.session_state.current_user not in st.session_state.users["Username"].values:
         st.session_state.logged_in = False
@@ -336,7 +335,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v54.0 Crash Control")
+    st.caption(f"👤 {st.session_state.current_user} | 🟢 v53.0 Unified Paddock")
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -344,12 +343,9 @@ with st.sidebar:
     
     st.divider()
     
-    # 1. BANA & VÄDER
     with st.expander("📍 Välj / Lägg till Bana", expanded=True):
         course_names = list(st.session_state.courses.keys())
         sel_course = st.selectbox("Aktiv Bana", course_names, key="course_selector")
-        
-        st.markdown("---")
         st.caption("🌍 Hitta ny bana (OSM)")
         search_q = st.text_input("Sök stad/plats (t.ex. Växjö)")
         
@@ -386,85 +382,70 @@ with st.sidebar:
         hole_wind = st.radio("Vind på tee:", ["Stilla", "Mot", "Med", "Sida"], horizontal=True)
 
     st.divider()
-    
-    # 2. SPELARE (MED SÄKERHETSSPÄRR)
-    all_owners = st.session_state.inventory["Owner"].unique().tolist()
-    st.markdown("👥 **Aktivt Team**")
-    
-    # SÄKERHET: Filtrera bort spöken direkt från sessionen
-    valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
-    st.session_state.active_players = valid_defaults
-    
-    with st.expander("Lägg till gäst/vän"):
-        new_p = st.text_input("Namn")
-        if st.button("Spara") and new_p:
-            start_kit = [{"Owner": new_p, "Modell": "Start Putter", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Status": "Bag"}]
-            st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
-            save_to_sheet(st.session_state.inventory, "Inventory")
-            st.cache_resource.clear(); st.success("Sparad!"); st.rerun()
-
-    active = st.multiselect("Välj förare", all_owners, default=st.session_state.active_players)
-    if active != st.session_state.active_players:
-        st.session_state.active_players = active
-        st.rerun()
-        
     if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
 
-# --- TABS ---
+# --- TABS (SWAPPED ORDER) ---
 tabs = ["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 TELEMETRY", "🎓 ACADEMY"]
 if st.session_state.user_role == "Admin": tabs.append("⚙️ HQ")
 current_tab = st.tabs(tabs)
 
-# TAB 1: WARM-UP
+# TAB 1: WARM-UP (Personalized)
 with current_tab[0]:
-    st.header("🔥 Driving Range")
-    if st.session_state.active_players:
-        curr_p = st.selectbox("Kalibrera:", st.session_state.active_players)
-        p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
-        bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
-        shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
-        disc_options = ["Välj Disc"] + bag_discs + ["--- HYLLAN ---"] + shelf_discs
-        c_in, c_list = st.columns([1, 1])
-        with c_in:
-            with st.container(border=True):
-                st.subheader("Registrera")
-                sel_disc_name = st.selectbox("Disc", disc_options)
-                style = st.radio("Stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
-                c_d, c_s = st.columns(2)
-                kast_len = c_d.number_input("Längd (m)", 0, 200, 50, step=5)
-                kast_sida = c_s.number_input("Sida (m)", -50, 50, 0, step=1, help="-Vä / +Hö")
-                if st.button("➕ Spara Kast", type="primary"):
-                    if sel_disc_name != "Välj Disc" and "---" not in sel_disc_name and kast_len > 0:
-                        d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
-                        st.session_state.warmup_shots.append({"disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"]), "turn": float(d_data["Turn"]), "fade": float(d_data["Fade"])})
-                        st.success("Sparat!")
-        with c_list:
-            if st.session_state.warmup_shots:
-                st.dataframe(pd.DataFrame(st.session_state.warmup_shots)[["disc","style","len","side"]], hide_index=True, height=200)
-                if st.button("Rensa"): st.session_state.warmup_shots = []; st.rerun()
+    st.header(f"🔥 Driving Range: {st.session_state.current_user}")
+    curr_p = st.session_state.current_user
+    p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
+    bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
+    shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
+    disc_options = ["Välj Disc"] + bag_discs + ["--- HYLLAN ---"] + shelf_discs
+    
+    c_in, c_list = st.columns([1, 1])
+    with c_in:
+        with st.container(border=True):
+            st.subheader("Registrera")
+            sel_disc_name = st.selectbox("Disc", disc_options)
+            style = st.radio("Stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
+            c_d, c_s = st.columns(2)
+            kast_len = c_d.number_input("Längd (m)", 0, 200, 50, step=5)
+            kast_sida = c_s.number_input("Sida (m)", -50, 50, 0, step=1, help="-Vä / +Hö")
+            if st.button("➕ Spara Kast", type="primary"):
+                if sel_disc_name != "Välj Disc" and "---" not in sel_disc_name and kast_len > 0:
+                    d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
+                    st.session_state.warmup_shots.append({"disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"]), "turn": float(d_data["Turn"]), "fade": float(d_data["Fade"])})
+                    st.success("Sparat!")
+    with c_list:
         if st.session_state.warmup_shots:
-            st.divider()
-            shots = st.session_state.warmup_shots
-            tot_pot = 0
-            for s in shots: opt_dist = max(s["speed"] * 10.0, 40.0); tot_pot += (s["len"] / opt_dist)
-            avg_form = tot_pot / len(shots)
-            st.session_state.daily_forms[curr_p] = avg_form
-            c1, c2 = st.columns(2)
-            c1.metric("Dagsform (Power)", f"{int(avg_form*100)}%")
-            fig, ax = plt.subplots(figsize=(4,3))
-            x=[s["side"] for s in shots]; y=[s["len"] for s in shots]
-            c=['#fff200' if "Backhand" in s["style"] else '#ffffff' for s in shots]
-            ax.scatter(x,y,c=c,s=80,alpha=0.7); ax.axvline(0,c='white',ls='--')
-            ax.set_xlim(-40,40); ax.set_ylim(0, max(y)*1.2)
-            ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
-            ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
-            c2.pyplot(fig)
-    else: st.info("Välj spelare.")
+            st.dataframe(pd.DataFrame(st.session_state.warmup_shots)[["disc","style","len","side"]], hide_index=True, height=200)
+            if st.button("Rensa"): st.session_state.warmup_shots = []; st.rerun()
+    if st.session_state.warmup_shots:
+        st.divider()
+        shots = st.session_state.warmup_shots
+        tot_pot = 0
+        for s in shots: opt_dist = max(s["speed"] * 10.0, 40.0); tot_pot += (s["len"] / opt_dist)
+        avg_form = tot_pot / len(shots)
+        st.session_state.daily_forms[curr_p] = avg_form
+        c1, c2 = st.columns(2)
+        c1.metric("Dagsform (Power)", f"{int(avg_form*100)}%")
+        fig, ax = plt.subplots(figsize=(4,3))
+        x=[s["side"] for s in shots]; y=[s["len"] for s in shots]
+        c=['#fff200' if "Backhand" in s["style"] else '#ffffff' for s in shots]
+        ax.scatter(x,y,c=c,s=80,alpha=0.7); ax.axvline(0,c='white',ls='--')
+        ax.set_xlim(-40,40); ax.set_ylim(0, max(y)*1.2)
+        ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
+        ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
+        c2.pyplot(fig)
 
-# TAB 2: RACE
+# TAB 2: RACE (MULTI-PLAYER ENABLED)
 with current_tab[1]:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
+    
+    st.subheader("🏁 Race Day")
+    # MULTI PLAYER SELECTOR FOR RACE
+    all_owners = st.session_state.inventory["Owner"].unique().tolist()
+    # Default is current user, allow adding others
+    race_players = st.multiselect("Lägg till motståndare i loppet:", [o for o in all_owners if o != st.session_state.current_user], default=[])
+    active_racers = [st.session_state.current_user] + race_players
+    
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
@@ -474,37 +455,45 @@ with current_tab[1]:
     with col_s:
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
-        for p in st.session_state.active_players:
+        
+        for p in active_racers:
             if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
-        for p in st.session_state.active_players:
+
+        for p in active_racers:
             with st.expander(f"🏎️ {p} (Score: {st.session_state.current_scores[hole][p]})", expanded=True):
                 hist_df = st.session_state.history
                 if not hist_df.empty:
                     p_hist = hist_df[(hist_df["Spelare"]==p) & (hist_df["Bana"]==bana) & (hist_df["Hål"]==hole)]
                     if not p_hist.empty: st.caption(f"👻 Historik: Snitt {p_hist['Resultat'].mean():.1f}")
-                with st.container(border=True):
-                    form = st.session_state.daily_forms.get(p, 1.0)
-                    c_sit, c_obs = st.columns([1, 1])
-                    situation = c_sit.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", horizontal=True)
-                    dist_left = c_sit.slider("Avstånd (m)", 0, 200, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
-                    base_obs = ["Träd Vänster", "Träd Höger", "Smal Korridor", "Port/Gap", "Lågt Tak", "Vatten", "Uppför", "Nedför"]
-                    obstacles = c_obs.multiselect("Hinder", base_obs, key=f"obs_{hole}_{p}")
-                    if st.button(f"🧠 AI-Caddy ({p})", key=f"ai_btn_{hole}_{p}"):
-                        p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
-                        with st.spinner("Beräknar..."):
-                            advice = get_ai_caddy_advice(p, p_bag, inf, st.session_state.weather_data, situation, obstacles, form)
-                            st.session_state.hole_advice[f"{hole}_{p}"] = advice
-                    if f"{hole}_{p}" in st.session_state.hole_advice: st.info(st.session_state.hole_advice[f"{hole}_{p}"])
+                
+                # Caddy advice only for self or if requested (simplified here)
+                if p == st.session_state.current_user:
+                    with st.container(border=True):
+                        form = st.session_state.daily_forms.get(p, 1.0)
+                        c_sit, c_obs = st.columns([1, 1])
+                        situation = c_sit.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", horizontal=True)
+                        dist_left = c_sit.slider("Avstånd (m)", 0, 200, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
+                        base_obs = ["Träd Vänster", "Träd Höger", "Smal Korridor", "Port/Gap", "Lågt Tak", "Vatten", "Uppför", "Nedför"]
+                        obstacles = c_obs.multiselect("Hinder", base_obs, key=f"obs_{hole}_{p}")
+                        if st.button(f"🧠 AI-Caddy ({p})", key=f"ai_btn_{hole}_{p}"):
+                            p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
+                            with st.spinner("Beräknar..."):
+                                advice = get_ai_caddy_advice(p, p_bag, inf, st.session_state.weather_data, situation, obstacles, form)
+                                st.session_state.hole_advice[f"{hole}_{p}"] = advice
+                        if f"{hole}_{p}" in st.session_state.hole_advice: st.info(st.session_state.hole_advice[f"{hole}_{p}"])
+
                 c1, c2, c3 = st.columns([1,2,1])
                 if c1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
                 c2.markdown(f"<h2 style='text-align:center'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
                 if c3.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
+                
                 p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
                 bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
                 all_discs = p_inv["Modell"].tolist()
                 opts = ["Välj Disc"] + (bag_discs if bag_discs else all_discs)
                 st.session_state.selected_discs[hole][p] = st.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
+
     if st.button("🏁 SPARA RUNDA", type="primary"):
         new_rows = []
         d = datetime.now().strftime("%Y-%m-%d")
@@ -525,11 +514,9 @@ with current_tab[2]:
     if prompt := st.chat_input("Fråga..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
-        bag_info = ""
-        if st.session_state.active_players:
-            p = st.session_state.active_players[0]
-            my_discs = st.session_state.inventory[st.session_state.inventory["Owner"]==p]["Modell"].tolist()
-            bag_info = f"Min väska: {', '.join(my_discs)}."
+        p = st.session_state.current_user
+        my_discs = st.session_state.inventory[st.session_state.inventory["Owner"]==p]["Modell"].tolist()
+        bag_info = f"Min väska: {', '.join(my_discs)}."
         context = f"Du är en elit-discgolf caddy. {bag_info}. Svara kort."
         messages = [{"role": "system", "content": context}] + st.session_state.chat_history
         with st.chat_message("assistant"):
@@ -541,9 +528,8 @@ with current_tab[2]:
 # TAB 4: UTRUSTNING
 with current_tab[3]:
     st.header("🧳 Logistik-Center")
-    if st.session_state.user_role == "Admin":
-        owner = st.selectbox("Hantera", st.session_state.active_players, index=0) if st.session_state.active_players else None
-    else: owner = st.session_state.current_user
+    owner = st.session_state.current_user
+    
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
@@ -556,35 +542,35 @@ with current_tab[3]:
                 st.session_state.inventory.loc[st.session_state.inventory["Owner"]==owner, "Status"] = "Shelf"
                 st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
                 save_to_sheet(st.session_state.inventory, "Inventory"); st.session_state.suggested_pack = []; st.success("Packat!"); st.rerun()
-    if owner:
-        st.markdown("---")
-        sort_mode = st.radio("Sortera på:", ["Speed", "Modell", "Typ"], horizontal=True)
-        my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
-        c_shelf = st.container(border=True); c_bag = st.container(border=True)
-        with c_shelf:
-            st.subheader("🏠 Hyllan")
-            shelf = my_inv[my_inv["Status"] == "Shelf"].sort_values(sort_mode)
-            if shelf.empty: st.caption("Tomt.")
-            else:
-                for idx, row in shelf.iterrows():
-                    c_txt, c_btn, c_del = st.columns([3, 1, 0.5])
-                    c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
-                    if c_btn.button("➡️", key=f"s2b_{idx}"):
-                        st.session_state.inventory.at[idx, "Status"] = "Bag"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-                    if c_del.button("🗑️", key=f"del_s_{idx}"):
-                        st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-        with c_bag:
-            st.subheader("🎒 Bagen")
-            bag = my_inv[my_inv["Status"] == "Bag"].sort_values(sort_mode)
-            if bag.empty: st.caption("Tomt.")
-            else:
-                for idx, row in bag.iterrows():
-                    c_btn, c_txt, c_del = st.columns([1, 3, 0.5])
-                    if c_btn.button("⬅️", key=f"b2s_{idx}"):
-                        st.session_state.inventory.at[idx, "Status"] = "Shelf"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-                    c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
-                    if c_del.button("🗑️", key=f"del_b_{idx}"):
-                        st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+    
+    st.markdown("---")
+    sort_mode = st.radio("Sortera på:", ["Speed", "Modell", "Typ"], horizontal=True)
+    my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == owner]
+    c_shelf = st.container(border=True); c_bag = st.container(border=True)
+    with c_shelf:
+        st.subheader("🏠 Hyllan")
+        shelf = my_inv[my_inv["Status"] == "Shelf"].sort_values(sort_mode)
+        if shelf.empty: st.caption("Tomt.")
+        else:
+            for idx, row in shelf.iterrows():
+                c_txt, c_btn, c_del = st.columns([3, 1, 0.5])
+                c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
+                if c_btn.button("➡️", key=f"s2b_{idx}"):
+                    st.session_state.inventory.at[idx, "Status"] = "Bag"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+                if c_del.button("🗑️", key=f"del_s_{idx}"):
+                    st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+    with c_bag:
+        st.subheader("🎒 Bagen")
+        bag = my_inv[my_inv["Status"] == "Bag"].sort_values(sort_mode)
+        if bag.empty: st.caption("Tomt.")
+        else:
+            for idx, row in bag.iterrows():
+                c_btn, c_txt, c_del = st.columns([1, 3, 0.5])
+                if c_btn.button("⬅️", key=f"b2s_{idx}"):
+                    st.session_state.inventory.at[idx, "Status"] = "Shelf"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
+                c_txt.text(f"{row['Modell']} ({int(row['Speed'])})")
+                if c_del.button("🗑️", key=f"del_b_{idx}"):
+                    st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
     st.markdown("---")
     with st.expander("➕ Lägg till ny disc"):
         if st.checkbox("Visa Kamera"):
@@ -623,36 +609,36 @@ with current_tab[4]:
     st.header("📈 SCUDERIA TELEMETRY")
     st1, st2, st3 = st.tabs(["✈️ Aero Lab", "🏎️ Race Performance", "🧩 Sector Analysis"])
     df = st.session_state.history
+    
     with st1:
         st.subheader("Aerodynamic Wind Tunnel")
-        if st.session_state.active_players:
-            p = st.session_state.active_players[0]
-            my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
-            c_sim1, c_sim2 = st.columns([1, 2])
-            with c_sim1:
-                power = st.slider("Power (%)", 50, 150, 100, step=10)
-                selected_sim_discs = st.multiselect("Välj Discar", my_inv["Modell"].unique())
-            with c_sim2:
-                fig, ax = plt.subplots(figsize=(6, 6))
-                ax.axvline(0, color='white', linestyle='--', alpha=0.3)
-                if selected_sim_discs:
-                    for d_name in selected_sim_discs:
-                        d_row = my_inv[my_inv["Modell"] == d_name].iloc[0]
-                        xs, ys = simulate_flight(d_row["Speed"], d_row["Glide"], d_row["Turn"], d_row["Fade"], power/100.0)
-                        stab = d_row["Turn"] + d_row["Fade"]
-                        col = '#ff2800' if stab < 0 else '#0066cc' if stab > 2 else '#ffffff'
-                        ax.plot(xs, ys, label=d_name, color=col, linewidth=2)
-                ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
-                ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
-                ax.set_xlim(-50, 50); ax.set_ylim(0, 150)
-                ax.grid(color='gray', linestyle=':', alpha=0.3)
-                if selected_sim_discs: ax.legend(facecolor='#1a1a1a', labelcolor='white')
-                st.pyplot(fig)
-        else: st.info("Välj spelare.")
+        p = st.session_state.current_user
+        my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
+        c_sim1, c_sim2 = st.columns([1, 2])
+        with c_sim1:
+            power = st.slider("Power (%)", 50, 150, 100, step=10)
+            selected_sim_discs = st.multiselect("Välj Discar", my_inv["Modell"].unique())
+        with c_sim2:
+            fig, ax = plt.subplots(figsize=(6, 6))
+            ax.axvline(0, color='white', linestyle='--', alpha=0.3)
+            if selected_sim_discs:
+                for d_name in selected_sim_discs:
+                    d_row = my_inv[my_inv["Modell"] == d_name].iloc[0]
+                    xs, ys = simulate_flight(d_row["Speed"], d_row["Glide"], d_row["Turn"], d_row["Fade"], power/100.0)
+                    stab = d_row["Turn"] + d_row["Fade"]
+                    col = '#ff2800' if stab < 0 else '#0066cc' if stab > 2 else '#ffffff'
+                    ax.plot(xs, ys, label=d_name, color=col, linewidth=2)
+            ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
+            ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
+            ax.set_xlim(-50, 50); ax.set_ylim(0, 150)
+            ax.grid(color='gray', linestyle=':', alpha=0.3)
+            if selected_sim_discs: ax.legend(facecolor='#1a1a1a', labelcolor='white')
+            st.pyplot(fig)
+
     with st2:
         if not df.empty:
             c1, c2 = st.columns(2)
-            sel_p_stats = c1.multiselect("Förare (Jämför)", df["Spelare"].unique(), default=df["Spelare"].unique())
+            sel_p_stats = c1.multiselect("Förare (Jämför)", df["Spelare"].unique(), default=[st.session_state.current_user])
             sel_c_stats = c2.selectbox("Grand Prix", df["Bana"].unique())
             dff = df[(df["Spelare"].isin(sel_p_stats)) & (df["Bana"]==sel_c_stats)]
             if not dff.empty:
@@ -662,10 +648,11 @@ with current_tab[4]:
                 st.altair_chart(chart, use_container_width=True)
             else: st.info("Ingen data.")
         else: st.info("Ingen historik.")
+
     with st3:
         if not df.empty:
             sel_b_sec = st.selectbox("Analysera Bana", df["Bana"].unique(), key="sec_bana")
-            sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=df["Spelare"].unique())
+            sel_p_sec = st.multiselect("Analysera Förare", df["Spelare"].unique(), key="sec_driver", default=[st.session_state.current_user])
             hdf = df[(df["Bana"]==sel_b_sec) & (df["Spelare"].isin(sel_p_sec))]
             if not hdf.empty:
                 hdf['Hål_Int'] = pd.to_numeric(hdf['Hål'], errors='coerce')
@@ -678,57 +665,8 @@ with current_tab[4]:
                 st.altair_chart((bar + point).interactive(), use_container_width=True)
             else: st.info("Ingen data.")
 
-# TAB 6: HQ (ADMIN)
-if st.session_state.user_role == "Admin":
-    with current_tab[5]:
-        st.header("⚙️ SCUDERIA HEADQUARTERS")
-        users = st.session_state.users
-        st.dataframe(users, hide_index=True)
-        c_u1, c_u2 = st.columns(2)
-        with c_u1:
-            with st.form("new_user"):
-                nu_name = st.text_input("Namn")
-                nu_pin = st.text_input("PIN (4 siffror)", max_chars=4)
-                nu_role = st.selectbox("Roll", ["Player", "Admin"])
-                if st.form_submit_button("Skapa Användare"):
-                    client = get_gsheet_client()
-                    ws = client.open("DiscCaddy_DB").worksheet("Users")
-                    ws.append_row([nu_name, nu_pin, nu_role, "True"])
-                    st.success("Användare skapad!")
-                    st.cache_resource.clear(); st.rerun()
-        with c_u2:
-            del_user = st.selectbox("Ta bort användare", users["Username"].tolist())
-            if st.button("🗑️ Radera Användare"):
-                client = get_gsheet_client()
-                ws = client.open("DiscCaddy_DB").worksheet("Users")
-                try:
-                    cell = ws.find(del_user)
-                    ws.delete_rows(cell.row)
-                    st.success("Raderad!")
-                    st.cache_resource.clear(); st.rerun()
-                except: st.error("Kunde inte hitta användaren.")
-        st.divider()
-        st.subheader("📥 Importera Data")
-        up = st.file_uploader("Ladda upp CSV", type=['csv'])
-        if up and st.button("Kör Import"):
-            try:
-                udf = pd.read_csv(up); nd = []
-                for i, r in udf.iterrows():
-                    if r.get('PlayerName')=='Par': continue
-                    mn = r.get('PlayerName')
-                    raw_date = str(r.get('StartDate', r.get('Date', datetime.now())))[:10]
-                    for hi in range(1, 19):
-                        h_score = r.get(f"Hole{hi}")
-                        if pd.notna(h_score):
-                            nd.append({"Datum": raw_date, "Bana": r.get('CourseName', 'Unknown'), "Spelare": mn, "Hål": str(hi), "Resultat": int(h_score), "Par": 3, "Disc_Used": "Unknown"})
-                if nd:
-                    new_hist = pd.concat([st.session_state.history, pd.DataFrame(nd)], ignore_index=True)
-                    st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
-                    st.success(f"Importerade {len(nd)} rader!")
-            except Exception as e: st.error(f"Fel: {e}")
-
-# TAB 7: ACADEMY
-with current_tab[6]:
+# TAB 6: ACADEMY
+with current_tab[5]:
     st.header("🎓 SCUDERIA ACADEMY")
     st1, st2 = st.tabs(["🎯 Putt-Coach", "📹 Video Scout"])
     with st1:
@@ -775,3 +713,78 @@ with current_tab[6]:
                 with st.spinner("AI-ögat granskar din sving..."):
                     advice = analyze_video_form(vid_file.read())
                     st.markdown(advice)
+
+# TAB 7: HQ (ADMIN ONLY)
+if st.session_state.user_role == "Admin":
+    with current_tab[6]:
+        st.header("⚙️ SCUDERIA HEADQUARTERS")
+        
+        st.subheader("👥 Crew Management")
+        users = st.session_state.users
+        st.dataframe(users, hide_index=True)
+        
+        c_u1, c_u2 = st.columns(2)
+        with c_u1:
+            with st.form("new_user_hq"):
+                st.markdown("**Skapa Nytt Konto**")
+                nu_name = st.text_input("Namn")
+                nu_pin = st.text_input("PIN (4 siffror)", max_chars=4)
+                nu_role = st.selectbox("Roll", ["Player", "Admin"])
+                nu_mun = st.text_input("Hemkommun (t.ex. Kungsbacka)")
+                
+                if st.form_submit_button("Skapa Användare & Scanna"):
+                    # 1. Add User
+                    client = get_gsheet_client()
+                    ws = client.open("DiscCaddy_DB").worksheet("Users")
+                    ws.append_row([nu_name, nu_pin, nu_role, "True", nu_mun])
+                    
+                    # 2. Add Starter Inventory
+                    start_kit = [{"Owner": nu_name, "Modell": "Start Putter", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Status": "Bag"}]
+                    st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
+                    save_to_sheet(st.session_state.inventory, "Inventory")
+                    
+                    # 3. Auto-Scan Courses in Municipality
+                    if nu_mun:
+                        lat, lon = get_lat_lon_from_query(nu_mun)
+                        if lat:
+                            new_courses = find_courses_via_osm_api(lat, lon)
+                            for nc in new_courses:
+                                std_holes = {str(x): {"l": 100, "p": 3, "shape": "Rak"} for x in range(1, 19)}
+                                add_course_to_sheet(nc["name"], nc["lat"], nc["lon"], std_holes)
+                            st.success(f"Användare {nu_name} skapad! Hittade {len(new_courses)} banor i {nu_mun}.")
+                        else:
+                            st.warning("Användare skapad, men kunde inte hitta kommunen för bankartläggning.")
+                    
+                    st.cache_resource.clear()
+                    st.rerun()
+        
+        with c_u2:
+            del_user = st.selectbox("Ta bort användare", users["Username"].tolist())
+            if st.button("🗑️ Radera Användare"):
+                client = get_gsheet_client()
+                ws = client.open("DiscCaddy_DB").worksheet("Users")
+                cell = ws.find(del_user)
+                ws.delete_rows(cell.row)
+                st.success("Raderad!")
+                st.cache_resource.clear()
+                st.rerun()
+
+        st.divider()
+        st.subheader("📥 Importera Data")
+        up = st.file_uploader("Ladda upp CSV", type=['csv'])
+        if up and st.button("Kör Import"):
+            try:
+                udf = pd.read_csv(up); nd = []
+                for i, r in udf.iterrows():
+                    if r.get('PlayerName')=='Par': continue
+                    mn = r.get('PlayerName')
+                    raw_date = str(r.get('StartDate', r.get('Date', datetime.now())))[:10]
+                    for hi in range(1, 19):
+                        h_score = r.get(f"Hole{hi}")
+                        if pd.notna(h_score):
+                            nd.append({"Datum": raw_date, "Bana": r.get('CourseName', 'Unknown'), "Spelare": mn, "Hål": str(hi), "Resultat": int(h_score), "Par": 3, "Disc_Used": "Unknown"})
+                if nd:
+                    new_hist = pd.concat([st.session_state.history, pd.DataFrame(nd)], ignore_index=True)
+                    st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
+                    st.success(f"Importerade {len(nd)} rader!")
+            except Exception as e: st.error(f"Fel: {e}")
