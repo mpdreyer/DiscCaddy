@@ -44,10 +44,13 @@ st.markdown("""
     }
     .engineer-title { color: #fff200; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 8px;}
     
-    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
+    /* Mobile Friendly Inputs */
+    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
     div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div { background-color: #fff200 !important; color: #000000 !important; border-color: #000000 !important; font-weight: bold; }
     input, .stSelectbox div[data-baseweb="select"] span { color: #000000 !important; }
+    
+    /* Clean up mobile view */
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
     </style>
 """, unsafe_allow_html=True)
@@ -207,55 +210,42 @@ def analyze_video_form(video_bytes):
         return "Kunde inte läsa videon."
     except Exception as e: return f"Video Error: {e}"
 
-# --- THE RACE ENGINEER (STRATEGIST) ---
-def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist_left, user_notes, image_bytes=None, form_factor=1.0):
+def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist_left, telemetry_notes, image_bytes=None, form_factor=1.0):
     race_bag = bag_df[bag_df["Status"] == "Bag"]
     if race_bag.empty: race_bag = bag_df
-    
     bag_str = ", ".join([f"{r['Modell']} ({r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in race_bag.iterrows()])
     
     system_prompt = """
-    Du är en Elit-Discgolf Strateg & Race Engineer för Scuderia Wonka.
-    Din uppgift är att analysera telemetri, väder och banprofil för att ge den optimala spellinjen.
-    Du måste ta hänsyn till spelarens dagsform (Power Level).
-    
-    Svara kort, koncist och auktoritärt (som en F1-ingenjör på radion).
-    Strukturera svaret i denna HTML-liknande stil (använd Markdown):
+    Du är en Elit-Discgolf Strateg & Race Engineer. 
+    Analysera telemetrin (kurvor, gap, avstånd) och väder.
+    Ta hänsyn till spelarens dagsform (Power Level).
+    Svara kort, koncist och auktoritärt i denna HTML-struktur:
     
     <div class="engineer-msg">
     <div class="engineer-title">STRATEGI</div>
-    <b>ANALYS:</b> [Kort analys av läget/vinden/formen]<br>
-    <b>PRIMÄRT VAL:</b> [Disc] - [Kasttyp] (t.ex. Backhand Hyzer)<br>
-    <b>EXECUTION:</b> [Instruktion för kastet, sikte, kraft]<br>
+    <b>ANALYS:</b> [Kort analys av läget]<br>
+    <b>PRIMÄRT VAL:</b> [Disc] - [Kasttyp] (t.ex. Forehand Hyzer)<br>
+    <b>EXECUTION:</b> [Instruktion: Sikte, kraft, vinkel]<br>
     </div>
     """
-    
     user_content = f"""
-    DATA TELEMETRI:
-    - Spelare: {player}
-    - Dagsform (Power): {int(form_factor*100)}% (Om <100%, rekommendera mer understabilt eller långsammare discar)
-    - Hål Info: Par {hole_info['p']}, Total Längd {hole_info['l']}m, Form: {hole_info['shape']}
-    - Nuvarande Läge: {situation}
-    - Avstånd kvar: {dist_left}m
+    TELEMETRI DATA:
+    - Spelare: {player} (Power: {int(form_factor*100)}%)
+    - Hål: {hole_info['l']}m, Par {hole_info['p']}, {hole_info['shape']}
+    - Läge: {situation}, Avstånd kvar: {dist_left}m
     - Väder: {weather['wind']} m/s, Temp {weather['temp']}C
-    - Förar-Feedback: {user_notes if user_notes else "Ingen specifik notering."}
+    - BAN-DATA (VIKTIGT): {telemetry_notes}
     
-    BAG INVENTORY:
-    {bag_str}
+    INVENTORY: {bag_str}
     """
-    
     msgs = [{"role": "system", "content": system_prompt}]
-    
     content_payload = [{"type": "text", "text": user_content}]
     
-    # Add vision if image exists
     if image_bytes:
         b64 = base64.b64encode(image_bytes).decode('utf-8')
         content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-        content_payload.append({"type": "text", "text": "ANALYSIS OF VISUALS: Identifiera hinder, korgens placering och höjdskillnader från bilden."})
-        
+        content_payload.append({"type": "text", "text": "ANALYSIS: Identifiera hinder och korg från bilden."})
     msgs.append({"role": "user", "content": content_payload})
-    
     return ask_ai(msgs)
 
 def generate_smart_bag(inventory, player, course_name):
@@ -364,7 +354,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v57.0 Race Engineer")
+    st.caption(f"👤 {st.session_state.current_user} | 🟢 v59.0 Telemetry Controls")
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -383,7 +373,7 @@ with st.sidebar:
     else:
         st.session_state.managed_user = st.session_state.current_user
 
-    # --- EVERYONE: TEAM SELECTION (FOR RACE/WARMUP) ---
+    # --- EVERYONE: TEAM SELECTION ---
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
     valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
     if not valid_defaults and st.session_state.current_user in all_owners: valid_defaults = [st.session_state.current_user]
@@ -398,13 +388,12 @@ with st.sidebar:
     st.divider()
     
     # 1. BANA & VÄDER
-    with st.expander("📍 Välj / Lägg till Bana", expanded=True):
-        course_names = list(st.session_state.courses.keys())
-        sel_course = st.selectbox("Aktiv Bana", course_names, key="course_selector")
-        
-        st.caption("🌍 Hitta ny bana (OSM)")
+    course_names = list(st.session_state.courses.keys())
+    st.markdown("**📍 Aktuell Bana (Race/Weather)**")
+    sel_course = st.selectbox("Välj Bana", course_names, key="course_selector", label_visibility="collapsed")
+    
+    with st.expander("🌍 Hitta ny bana (OSM)"):
         search_q = st.text_input("Sök stad/plats (t.ex. Växjö)")
-        
         if st.button("🔍 Sök Banor"):
             if search_q:
                 with st.spinner("Skannar satelliter..."):
@@ -445,10 +434,9 @@ tabs = ["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 T
 if st.session_state.user_role == "Admin": tabs.append("⚙️ HQ")
 current_tab = st.tabs(tabs)
 
-# TAB 1: WARM-UP (MULTI-PLAYER)
+# TAB 1: WARM-UP
 with current_tab[0]:
     st.header("🔥 Driving Range")
-    
     if st.session_state.active_players:
         curr_thrower = st.selectbox("Vem kastar?", st.session_state.active_players)
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_thrower]
@@ -469,12 +457,8 @@ with current_tab[0]:
                     if sel_disc_name != "Välj Disc" and "---" not in sel_disc_name and kast_len > 0:
                         d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
                         st.session_state.warmup_shots.append({
-                            "player": curr_thrower,
-                            "disc": sel_disc_name, 
-                            "style": style, 
-                            "len": kast_len, 
-                            "side": kast_sida, 
-                            "speed": float(d_data["Speed"])
+                            "player": curr_thrower, "disc": sel_disc_name, "style": style, 
+                            "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"])
                         })
                         st.success("Sparat!")
     with c_list:
@@ -514,7 +498,7 @@ with current_tab[0]:
         c2.pyplot(fig)
     else: st.info("Lägg till spelare i menyn till vänster.")
 
-# TAB 2: RACE (ENGINEER EDITION)
+# TAB 2: RACE
 with current_tab[1]:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
@@ -568,18 +552,32 @@ with current_tab[1]:
                 with c_ai:
                     with st.container(border=True):
                         st.markdown("**📻 TEAM RADIO (STRATEGY)**")
-                        
-                        # Dynamic Form (Telemetry)
                         form = st.session_state.daily_forms.get(p, 1.0)
-                        if form != 1.0:
-                            st.caption(f"⚠️ Telemetri: Dagsform är {int(form*100)}% power.")
                         
                         c_sit1, c_sit2 = st.columns(2)
                         situation = c_sit1.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", label_visibility="collapsed")
                         dist_left = c_sit2.slider("Avstånd (m)", 0, 300, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
                         
-                        user_notes = st.text_input("Förar-Feedback (t.ex. 'Träd höger', 'Uppför')", key=f"note_{hole}_{p}")
+                        # --- TELEMETRY CONFIGURATOR (SLIDERS) ---
+                        telemetry_str = ""
                         
+                        # A. CURVE
+                        curve_type = st.radio("Banans Form", ["Rak", "Vänster", "Höger"], horizontal=True, key=f"curve_{hole}_{p}")
+                        if curve_type != "Rak":
+                            curve_dist = st.slider("Sväng startar om (m)", 0, 150, 50, key=f"cd_{hole}_{p}")
+                            telemetry_str += f"Banan svänger {curve_type} efter {curve_dist}m. "
+                        
+                        # B. GAP/HINDER
+                        if st.checkbox("Trång Port / Hinder", key=f"gapt_{hole}_{p}"):
+                            c_gap1, c_gap2 = st.columns(2)
+                            gap_dist = c_gap1.slider("Avstånd Hinder (m)", 0, 150, 30, key=f"gd_{hole}_{p}")
+                            gap_width = c_gap2.slider("Bredd på lucka (m)", 1, 20, 5, key=f"gw_{hole}_{p}")
+                            telemetry_str += f"Det finns en {gap_width}m bred port/lucka {gap_dist}m bort. "
+                        
+                        # C. BASKET
+                        basket_pos = st.selectbox("Korgens läge", ["Normal", "Upphöjd", "På kulle (Risk för rull)", "Skymd"], key=f"bk_{hole}_{p}")
+                        telemetry_str += f"Korgplacering: {basket_pos}. "
+
                         # CAMERA
                         use_cam = st.checkbox("📸 Aktivera 'Helmet Cam'", key=f"cam_tog_{hole}_{p}")
                         img_data = None
@@ -590,7 +588,7 @@ with current_tab[1]:
                         if st.button(f"🔊 Request Strategy ({p})", key=f"ai_btn_{hole}_{p}", type="primary"):
                             p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
                             with st.spinner("Race Engineer analyzing data..."):
-                                advice = get_race_engineer_advice(p, p_bag, inf, st.session_state.weather_data, situation, dist_left, user_notes, img_data, form)
+                                advice = get_race_engineer_advice(p, p_bag, inf, st.session_state.weather_data, situation, dist_left, telemetry_str, img_data, form)
                                 st.session_state.hole_advice[f"{hole}_{p}"] = advice
                         
                         if f"{hole}_{p}" in st.session_state.hole_advice:
