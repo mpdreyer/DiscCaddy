@@ -26,7 +26,7 @@ except ImportError:
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
 
-# SCUDERIA LIVERY CSS (HIGH VISIBILITY)
+# SCUDERIA LIVERY CSS (HIGH VISIBILITY & CONTRAST)
 st.markdown("""
     <style>
     /* Main Background */
@@ -46,10 +46,15 @@ st.markdown("""
         border-right: 3px solid #fff200;
     }
     
-    /* Force all text in sidebar to be visible */
-    section[data-testid="stSidebar"] p, 
-    section[data-testid="stSidebar"] span, 
+    /* Force Input Labels to be WHITE in Sidebar */
     section[data-testid="stSidebar"] label {
+        color: #ffffff !important;
+        font-weight: bold;
+        font-size: 14px;
+    }
+    
+    /* Force Markdown text in Sidebar to be WHITE */
+    section[data-testid="stSidebar"] p, section[data-testid="stSidebar"] span {
         color: #ffffff !important;
     }
 
@@ -432,8 +437,8 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    # FORCE VISIBILITY OF USER NAME WITH HTML
-    st.markdown(f"<div style='color: #fff200; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>👤 {st.session_state.current_user} | 🟢 v61.0 High Visibility</div>", unsafe_allow_html=True)
+    # FORCE VISIBILITY OF USER NAME WITH HTML (Ferrari Yellow)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v61.1 High Visibility</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -444,9 +449,10 @@ with st.sidebar:
     # --- ADMIN: IMPERSONATION TOOL ---
     if st.session_state.user_role == "Admin":
         all_owners = st.session_state.inventory["Owner"].unique().tolist()
-        if not st.session_state.managed_user: st.session_state.managed_user = st.session_state.current_user
-        if st.session_state.managed_user not in all_owners:
-            st.session_state.managed_user = all_owners[0] if all_owners else st.session_state.current_user
+        # LOGIC FIX: Always ensure managed_user is valid. If None, set to Self.
+        if not st.session_state.managed_user or st.session_state.managed_user not in all_owners:
+            st.session_state.managed_user = st.session_state.current_user
+            
         managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=all_owners.index(st.session_state.managed_user))
         st.session_state.managed_user = managed
     else:
@@ -514,7 +520,7 @@ current_tab = st.tabs(tabs)
 
 # TAB 1: WARM-UP
 with current_tab[0]:
-    st.header(f"🔥 Driving Range")
+    st.header("🔥 Driving Range")
     if st.session_state.active_players:
         curr_thrower = st.selectbox("Vem kastar?", st.session_state.active_players)
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_thrower]
@@ -679,6 +685,9 @@ with current_tab[2]:
 # TAB 4: UTRUSTNING
 with current_tab[3]:
     target_p = st.session_state.managed_user
+    # Ensure target_p is valid
+    if not target_p: target_p = st.session_state.current_user
+    
     st.header(f"🧳 Logistik: {target_p}")
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
