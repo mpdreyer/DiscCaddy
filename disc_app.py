@@ -318,7 +318,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     You are a World Class F1-Level Race Engineer for Disc Golf (Scuderia Wonka).
     INPUT DATA: Distance, Wind, Player Form, Inventory.
     YOUR MISSION: Calculate optimal flight path and disc selection.
-    OUTPUT FORMAT (HTML ONLY, STYLISH): Use icons: 📍, 🏎️, 🔮.
+    OUTPUT FORMAT (HTML ONLY, STYLISH): Use icons: 📍, 🏎️, 🔮. No markdown code blocks!
     <div class="race-engineer-box">
         <div class="re-header">🏎️ SCUDERIA STRATEGY</div>
         <div class="re-row"><span class="re-label">📍 POSITION:</span> <span class="re-val">[Distance]m to Pin | Wind: [Wind] m/s</span></div>
@@ -343,36 +343,49 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
         content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
         content_payload.append({"type": "text", "text": "VISUAL TELEMETRY: Analyze image for obstacles."})
     msgs.append({"role": "user", "content": content_payload})
-    return ask_ai(msgs)
+    
+    # --- CLEANING THE RESPONSE ---
+    response = ask_ai(msgs)
+    return response.replace("```html", "").replace("```", "").strip()
 
 def generate_smart_bag(inventory, player, course_name):
     holes = st.session_state.courses[course_name]["holes"]
     lengths = [h["l"] for h in holes.values()]; max_len = max(lengths)
-    all_discs = inventory[inventory["Owner"] == player].copy()
-    for col in ["Speed", "Glide", "Turn", "Fade"]: all_discs[col] = pd.to_numeric(all_discs[col], errors='coerce').fillna(0)
-    all_discs["Stability_Val"] = all_discs["Turn"] + all_discs["Fade"]
+    
+    # 1. Get Discs ON SHELF (Candidate pool)
+    p_inv = inventory[inventory["Owner"] == player]
+    shelf = p_inv[p_inv["Status"] == "Shelf"]
+    
     pack_indices = []
     
-    def add_best_of(df, count=1, sort_col="Speed", asc=True):
-        if df.empty: return
-        sorted_df = df.sort_values(sort_col, ascending=asc)
-        for i in range(min(count, len(sorted_df))): pack_indices.append(sorted_df.iloc[i].name)
+    if shelf.empty:
+        return []
 
-    putters = all_discs[all_discs["Typ"] == "Putter"]; add_best_of(putters, 2, "Speed", True) 
-    mids = all_discs[all_discs["Typ"] == "Midrange"]
-    if not mids.empty:
-        pack_indices.append(mids.sort_values("Stability_Val", ascending=False).iloc[0].name)
-        pack_indices.append(mids.sort_values("Stability_Val", ascending=True).iloc[0].name)
-    fairways = all_discs[all_discs["Typ"] == "Fairway Driver"]
-    if not fairways.empty:
-        pack_indices.append(fairways.sort_values("Stability_Val", ascending=False).iloc[0].name)
-        pack_indices.append(fairways.sort_values("Stability_Val", ascending=True).iloc[0].name)
+    # 2. STRATEGY: BAD DAY COMPENSATION (Find Understable)
+    # Filter: Turn < -1
+    bad_day_savers = shelf[shelf["Turn"] < -1.0]
+    if not bad_day_savers.empty:
+        pack_indices.append(bad_day_savers.sort_values("Turn", ascending=True).iloc[0].name)
+    
+    # 3. STRATEGY: WORKHORSE (Stable Mid/Fairway)
+    # Filter: Speed 4-8, Turn > -1, Fade < 3
+    workhorses = shelf[(shelf["Speed"] >= 4) & (shelf["Speed"] <= 8) & (shelf["Turn"] >= -1) & (shelf["Fade"] <= 3)]
+    if not workhorses.empty:
+         pack_indices.append(workhorses.sort_values("Glide", ascending=False).iloc[0].name)
+
+    # 4. STRATEGY: WIND FIGHTER (Overstable)
+    # Filter: Fade > 2.5
+    wind_fighters = shelf[shelf["Fade"] >= 2.5]
+    if not wind_fighters.empty:
+         pack_indices.append(wind_fighters.sort_values("Fade", ascending=False).iloc[0].name)
+
+    # 5. STRATEGY: BOMBER (Distance, only if course is long)
     if max_len > 90:
-        drivers = all_discs[all_discs["Typ"] == "Distance Driver"]
-        if not drivers.empty:
-            pack_indices.append(drivers.sort_values("Glide", ascending=False).iloc[0].name)
-            pack_indices.append(drivers.sort_values("Fade", ascending=False).iloc[0].name)
-    return list(set(pack_indices))
+        bombers = shelf[shelf["Speed"] >= 9]
+        if not bombers.empty:
+            pack_indices.append(bombers.sort_values("Speed", ascending=False).iloc[0].name)
+
+    return list(set(pack_indices)) # Return unique indices
 
 def simulate_flight(speed, glide, turn, fade, power_factor=1.0):
     eff_turn = turn - (power_factor - 1.0) * 2; eff_fade = fade + (1.0 - power_factor) * 2
@@ -401,6 +414,7 @@ if 'data_loaded' not in st.session_state:
         st.session_state.users = u
     st.session_state.data_loaded = True
 
+# Safety Check
 if st.session_state.get('logged_in') and not st.session_state.users.empty:
     if st.session_state.current_user not in st.session_state.users["Username"].values:
         st.session_state.logged_in = False
@@ -450,7 +464,8 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v64.0 Stable Multiplayer</div>", unsafe_allow_html=True)
+    # FORCE VISIBILITY OF USER NAME WITH HTML (Ferrari Yellow)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v64.1 Visuals & Logistics</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -461,6 +476,9 @@ with st.sidebar:
     # --- ADMIN: IMPERSONATION TOOL ---
     if st.session_state.user_role == "Admin":
         all_owners = st.session_state.inventory["Owner"].unique().tolist()
+        
+        # --- CRASH FIX START ---
+        # Ensure managed_user is in all_owners list to prevent ValueError in selectbox index
         if not all_owners: 
              st.session_state.managed_user = None 
              managed = None
@@ -471,31 +489,28 @@ with st.sidebar:
                     st.session_state.managed_user = st.session_state.current_user
                 else:
                     st.session_state.managed_user = all_owners[0]
+            
             try:
                 curr_idx = all_owners.index(st.session_state.managed_user)
             except ValueError:
                 curr_idx = 0
+                
             managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=curr_idx)
             st.session_state.managed_user = managed
+        # --- CRASH FIX END ---
     else:
         st.session_state.managed_user = st.session_state.current_user
 
-    # --- EVERYONE: TEAM SELECTION (MULTIPLAYER) ---
+    # --- EVERYONE: TEAM SELECTION ---
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
+    valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
+    if not valid_defaults and st.session_state.current_user in all_owners: valid_defaults = [st.session_state.current_user]
     
-    # Ensure current user is always available to be selected/default
-    available_teammates = [p for p in all_owners if p != st.session_state.current_user]
+    st.markdown("👥 **Team för dagen (Race/Warmup)**")
+    active_team = st.multiselect("Lägg till kompisar:", all_owners, default=valid_defaults)
     
-    st.markdown("👥 **Race Crew (Flera spelare)**")
-    # Multiselect for adding OTHERS. Current user is always implicit base.
-    added_teammates = st.multiselect("Lägg till kompisar:", available_teammates)
-    
-    # Combine Current User + Selected Friends
-    final_active_team = [st.session_state.current_user] + added_teammates
-    
-    # Update state if changed
-    if final_active_team != st.session_state.active_players:
-        st.session_state.active_players = final_active_team
+    if active_team != st.session_state.active_players:
+        st.session_state.active_players = active_team
         st.rerun()
 
     st.divider()
@@ -549,11 +564,8 @@ current_tab = st.tabs(tabs)
 # TAB 1: WARM-UP
 with current_tab[0]:
     st.header("🔥 Driving Range")
-    
     if st.session_state.active_players:
-        # Safe Selectbox for Thrower
         curr_thrower = st.selectbox("Vem kastar?", st.session_state.active_players)
-        
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_thrower]
         bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
         shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
@@ -579,7 +591,6 @@ with current_tab[0]:
                 if st.button("Rensa Session"): st.session_state.warmup_shots = []; st.rerun()
         if st.session_state.warmup_shots:
             st.divider()
-            # Calculate form for everyone
             for p in st.session_state.active_players:
                 p_shots = [s for s in st.session_state.warmup_shots if s['player'] == p]
                 if p_shots:
@@ -604,9 +615,8 @@ with current_tab[0]:
             ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
             ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
             handles, labels = ax.get_legend_handles_labels()
-            if labels:
-                by_label = dict(zip(labels, handles))
-                ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
+            by_label = dict(zip(labels, handles))
+            ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
             c2.pyplot(fig)
     else: st.info("Välj spelare i menyn.")
 
@@ -615,10 +625,7 @@ with current_tab[1]:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
     st.subheader(f"🏁 Race Day: {bana}")
-    
-    # Use the active team from sidebar
     active_racers = st.session_state.active_players
-    
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
@@ -628,13 +635,9 @@ with current_tab[1]:
     with col_s:
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
-        
-        # Ensure everyone has a score entry
         for p in active_racers:
             if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
-        
-        # --- PLAYER COCKPITS (Loop through ALL active players) ---
         for p in active_racers:
             with st.expander(f"🏎️ {p} (Score: {st.session_state.current_scores[hole][p]})", expanded=True):
                 c_ghost, c_ai = st.columns([1, 2])
@@ -652,14 +655,11 @@ with current_tab[1]:
                     st.markdown(f"<div class='metric-box'><div class='metric-label'>HISTORIK</div><div class='metric-value'>{avg_score}</div><div class='metric-sub'>{delta} vs Par</div></div>", unsafe_allow_html=True)
                 with c_ai:
                     with st.container(border=True):
-                        st.markdown(f"**📻 TEAM RADIO ({p})**")
+                        st.markdown("**📻 TEAM RADIO (STRATEGY)**")
                         form = st.session_state.daily_forms.get(p, 1.0)
-                        
-                        # CONTROLS
                         c_sit1, c_sit2 = st.columns(2)
                         situation = c_sit1.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", label_visibility="collapsed")
                         dist_left = c_sit2.slider("Avstånd (m)", 0, 300, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
-                        
                         telemetry_str = ""
                         curve_type = st.radio("Banans Form", ["Rak", "Vänster", "Höger"], horizontal=True, key=f"curve_{hole}_{p}")
                         if curve_type != "Rak":
@@ -672,19 +672,16 @@ with current_tab[1]:
                             telemetry_str += f"Det finns en {gap_width}m bred port/lucka {gap_dist}m bort. "
                         basket_pos = st.selectbox("Korgens läge", ["Normal", "Upphöjd", "På kulle (Risk för rull)", "Skymd"], key=f"bk_{hole}_{p}")
                         telemetry_str += f"Korgplacering: {basket_pos}. "
-                        
                         use_cam = st.checkbox("📸 Aktivera 'Helmet Cam'", key=f"cam_tog_{hole}_{p}")
                         img_data = None
                         if use_cam:
                             img_file = st.camera_input("Ta bild på banan", key=f"ci_{hole}_{p}")
                             if img_file: img_data = img_file.getvalue()
-                        
                         if st.button(f"🔊 Request Strategy ({p})", key=f"ai_btn_{hole}_{p}", type="primary"):
                             p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
                             with st.spinner("Race Engineer analyzing data..."):
                                 advice = get_race_engineer_advice(p, p_bag, inf, st.session_state.weather_data, situation, dist_left, telemetry_str, img_data, form)
                                 st.session_state.hole_advice[f"{hole}_{p}"] = advice
-                        
                         if f"{hole}_{p}" in st.session_state.hole_advice: st.markdown(st.session_state.hole_advice[f"{hole}_{p}"], unsafe_allow_html=True)
                 st.divider()
                 c_sc1, c_sc2, c_disc = st.columns([1, 1, 3])
@@ -740,9 +737,8 @@ with current_tab[3]:
         if c2.button("Generera"): st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc); st.rerun()
         if st.session_state.suggested_pack:
             pack_names = st.session_state.inventory.loc[st.session_state.suggested_pack, "Modell"].tolist()
-            c1.info(f"Föreslår: {', '.join(pack_names)}")
+            c1.info(f"Föreslår dessa tillägg från hyllan: {', '.join(pack_names)}")
             if c3.button("Verkställ", type="primary"):
-                st.session_state.inventory.loc[st.session_state.inventory["Owner"]==target_p, "Status"] = "Shelf"
                 st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
                 save_to_sheet(st.session_state.inventory, "Inventory"); st.session_state.suggested_pack = []; st.success("Packat!"); st.rerun()
     st.markdown("---")
