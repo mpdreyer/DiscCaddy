@@ -438,7 +438,7 @@ if not st.session_state.logged_in:
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
     # FORCE VISIBILITY OF USER NAME WITH HTML (Ferrari Yellow)
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v61.1 High Visibility</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v61.2 Safety Net</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -449,12 +449,30 @@ with st.sidebar:
     # --- ADMIN: IMPERSONATION TOOL ---
     if st.session_state.user_role == "Admin":
         all_owners = st.session_state.inventory["Owner"].unique().tolist()
-        # LOGIC FIX: Always ensure managed_user is valid. If None, set to Self.
-        if not st.session_state.managed_user or st.session_state.managed_user not in all_owners:
-            st.session_state.managed_user = st.session_state.current_user
+        
+        # --- CRASH FIX START ---
+        # Ensure managed_user is in all_owners list to prevent ValueError in selectbox index
+        if not all_owners: # If list is empty
+             st.session_state.managed_user = None 
+             managed = None
+             st.warning("Inga spelare med utrustning hittades.")
+        else:
+            if not st.session_state.managed_user or st.session_state.managed_user not in all_owners:
+                # If managed user is invalid/missing, default to first in list or current user if present
+                if st.session_state.current_user in all_owners:
+                    st.session_state.managed_user = st.session_state.current_user
+                else:
+                    st.session_state.managed_user = all_owners[0]
             
-        managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=all_owners.index(st.session_state.managed_user))
-        st.session_state.managed_user = managed
+            # Safe selectbox creation
+            try:
+                curr_idx = all_owners.index(st.session_state.managed_user)
+            except ValueError:
+                curr_idx = 0
+                
+            managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=curr_idx)
+            st.session_state.managed_user = managed
+        # --- CRASH FIX END ---
     else:
         st.session_state.managed_user = st.session_state.current_user
 
