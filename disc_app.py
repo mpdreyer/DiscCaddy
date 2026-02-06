@@ -438,7 +438,7 @@ if not st.session_state.logged_in:
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
     # FORCE VISIBILITY OF USER NAME WITH HTML (Ferrari Yellow)
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v62.1 Stabilized Core</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v62.2 The Real Deal</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -633,6 +633,8 @@ with current_tab[1]:
                         c_sit1, c_sit2 = st.columns(2)
                         situation = c_sit1.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", label_visibility="collapsed")
                         dist_left = c_sit2.slider("Avstånd (m)", 0, 300, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
+                        
+                        # --- TELEMETRY CONFIGURATOR ---
                         telemetry_str = ""
                         curve_type = st.radio("Banans Form", ["Rak", "Vänster", "Höger"], horizontal=True, key=f"curve_{hole}_{p}")
                         if curve_type != "Rak":
@@ -645,6 +647,8 @@ with current_tab[1]:
                             telemetry_str += f"Det finns en {gap_width}m bred port/lucka {gap_dist}m bort. "
                         basket_pos = st.selectbox("Korgens läge", ["Normal", "Upphöjd", "På kulle (Risk för rull)", "Skymd"], key=f"bk_{hole}_{p}")
                         telemetry_str += f"Korgplacering: {basket_pos}. "
+                        # ---------------------------------
+
                         use_cam = st.checkbox("📸 Aktivera 'Helmet Cam'", key=f"cam_tog_{hole}_{p}")
                         img_data = None
                         if use_cam:
@@ -701,9 +705,7 @@ with current_tab[2]:
 # TAB 4: UTRUSTNING
 with current_tab[3]:
     target_p = st.session_state.managed_user
-    # Ensure target_p is valid
     if not target_p: target_p = st.session_state.current_user
-    
     st.header(f"🧳 Logistik: {target_p}")
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
