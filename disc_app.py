@@ -97,7 +97,24 @@ st.markdown("""
         border-radius: 0 0 5px 5px; 
     }
     
-    /* Engineer Console */
+    /* Race Engineer Output Box */
+    .race-engineer-box {
+        background-color: #111111;
+        border: 2px solid #fff200;
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 15px;
+        color: white;
+        font-family: 'Courier New', monospace;
+        box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+    }
+    .re-header { color: #fff200; font-weight: bold; border-bottom: 1px solid #fff200; margin-bottom: 10px; font-size: 18px; }
+    .re-row { margin-bottom: 8px; }
+    .re-label { color: #aaaaaa; font-weight: bold; }
+    .re-val { color: #ffffff; font-weight: normal; }
+    .re-prob { color: #00ff00; font-weight: bold; font-size: 16px; }
+    
+    /* Engineer Console Styling (Simple) */
     .engineer-msg {
         background-color: #111111;
         border-left: 4px solid #fff200;
@@ -107,14 +124,7 @@ st.markdown("""
         font-family: 'Courier New', monospace;
         color: white;
     }
-    .engineer-title { 
-        color: #fff200; 
-        font-weight: bold; 
-        text-transform: uppercase; 
-        border-bottom: 1px solid #333; 
-        margin-bottom: 8px;
-    }
-    
+
     /* Metric Box */
     .metric-box { 
         background-color: #1a1a1a; 
@@ -297,37 +307,57 @@ def analyze_video_form(video_bytes):
     except Exception as e: return f"Video Error: {e}"
 
 def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist_left, telemetry_notes, image_bytes=None, form_factor=1.0):
+    # Only use discs IN THE BAG
     race_bag = bag_df[bag_df["Status"] == "Bag"]
-    if race_bag.empty: race_bag = bag_df
-    bag_str = ", ".join([f"{r['Modell']} ({r['Plast']}, {r['Speed']}/{r['Glide']}/{r['Turn']}/{r['Fade']})" for i, r in race_bag.iterrows()])
+    if race_bag.empty: race_bag = bag_df # Fallback if empty bag
     
+    # Create inventory string including plastic info
+    bag_str = ", ".join([f"{r['Modell']} ({r['Plast']})" for i, r in race_bag.iterrows()])
+    
+    # THE FERRARI PROMPT 🏎️
     system_prompt = """
-    Du är en Elit-Discgolf Strateg & Race Engineer. 
-    Analysera telemetrin (kurvor, gap, avstånd) och väder.
-    Ta hänsyn till spelarens dagsform och discens plast/slitage.
-    Svara kort, koncist och auktoritärt i denna HTML-struktur:
-    <div class="engineer-msg">
-    <div class="engineer-title">STRATEGI</div>
-    <b>ANALYS:</b> [Kort analys]<br>
-    <b>PRIMÄRT VAL:</b> [Disc + Plast] - [Kasttyp]<br>
-    <b>EXECUTION:</b> [Instruktion: Sikte, kraft, vinkel]<br>
+    You are a World Class F1-Level Race Engineer for Disc Golf (Scuderia Wonka).
+    
+    INPUT DATA:
+    - Distance to Basket
+    - Wind Conditions
+    - Player Form (Power Level) from Warm-up
+    - Disc Inventory (In the Bag)
+    
+    YOUR MISSION:
+    Calculate the optimal flight path and disc selection.
+    
+    OUTPUT FORMAT (HTML ONLY, STYLISH):
+    Use these icons: 📍, 🏎️, 🔮.
+    
+    <div class="race-engineer-box">
+        <div class="re-header">🏎️ SCUDERIA STRATEGY</div>
+        <div class="re-row"><span class="re-label">📍 POSITION:</span> <span class="re-val">[Distance]m to Pin | Wind: [Wind] m/s</span></div>
+        <div class="re-row"><span class="re-label">💿 RECOMMENDATION:</span> <span class="re-val"><b>[Disc Name]</b> ([Plastic])</span></div>
+        <div class="re-row"><span class="re-label">📐 FLIGHT PLAN:</span> <span class="re-val">[Release Angle] (e.g. 15° Hyzer) | [Power]% Thrust</span></div>
+        <div class="re-row"><span class="re-label">📝 TACTIC:</span> <span class="re-val">[Brief, sharp advice like 'Aim right of the tree, let stability fight back']</span></div>
+        <hr style="border-color:#fff200;">
+        <div class="re-prob">🔮 BIRDIE PROBABILITY: [XX]%</div>
     </div>
     """
+    
     user_content = f"""
-    TELEMETRI DATA:
-    - Spelare: {player} (Power: {int(form_factor*100)}%)
-    - Hål: {hole_info['l']}m, Par {hole_info['p']}, {hole_info['shape']}
-    - Läge: {situation}, Avstånd kvar: {dist_left}m
-    - Väder: {weather['wind']} m/s, Temp {weather['temp']}C
-    - BAN-DATA: {telemetry_notes}
-    INVENTORY: {bag_str}
+    PLAYER: {player} (Form: {int(form_factor*100)}%)
+    HOLE: {hole_info['l']}m, Par {hole_info['p']}, {hole_info['shape']}
+    LIE: {situation}, DISTANCE LEFT: {dist_left}m
+    WIND: {weather['wind']} m/s
+    NOTES: {telemetry_notes}
+    BAG: {bag_str}
     """
+    
     msgs = [{"role": "system", "content": system_prompt}]
     content_payload = [{"type": "text", "text": user_content}]
+    
     if image_bytes:
         b64 = base64.b64encode(image_bytes).decode('utf-8')
         content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-        content_payload.append({"type": "text", "text": "ANALYSIS: Identifiera hinder och korg från bilden."})
+        content_payload.append({"type": "text", "text": "VISUAL TELEMETRY: Analyze image for obstacles."})
+        
     msgs.append({"role": "user", "content": content_payload})
     return ask_ai(msgs)
 
@@ -438,7 +468,7 @@ if not st.session_state.logged_in:
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
     # FORCE VISIBILITY OF USER NAME WITH HTML (Ferrari Yellow)
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v62.2 The Real Deal</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v63.0 Grand Prix Engineer</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -593,24 +623,33 @@ with current_tab[0]:
             c2.pyplot(fig)
     else: st.info("Välj spelare i menyn.")
 
-# TAB 2: RACE
+# TAB 2: RACE (GRAND PRIX EDITION)
 with current_tab[1]:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
     st.subheader(f"🏁 Race Day: {bana}")
+    
+    # FORCE AUTO-START IF LIST IS EMPTY
+    if not st.session_state.active_players:
+        st.session_state.active_players = [st.session_state.current_user]
+    
     active_racers = st.session_state.active_players
+    
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
-        hole = st.selectbox("Hål", holes)
+        hole = st.selectbox("Korg #", holes) # RENAMED HÅL -> KORG
         inf = c_data["holes"][hole]
-        st.metric(f"Hål {hole}", f"{inf['l']}m", f"Par {inf['p']}"); st.caption(inf.get('shape', 'Rak'))
+        st.metric(f"Korg {hole}", f"{inf['l']}m", f"Par {inf['p']}"); st.caption(inf.get('shape', 'Rak'))
     with col_s:
+        # Init scores safety
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
+        
         for p in active_racers:
             if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
+        
         for p in active_racers:
             with st.expander(f"🏎️ {p} (Score: {st.session_state.current_scores[hole][p]})", expanded=True):
                 c_ghost, c_ai = st.columns([1, 2])
@@ -630,11 +669,12 @@ with current_tab[1]:
                     with st.container(border=True):
                         st.markdown("**📻 TEAM RADIO (STRATEGY)**")
                         form = st.session_state.daily_forms.get(p, 1.0)
+                        
+                        # TELEMETRY INPUTS
                         c_sit1, c_sit2 = st.columns(2)
                         situation = c_sit1.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", label_visibility="collapsed")
                         dist_left = c_sit2.slider("Avstånd (m)", 0, 300, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
                         
-                        # --- TELEMETRY CONFIGURATOR ---
                         telemetry_str = ""
                         curve_type = st.radio("Banans Form", ["Rak", "Vänster", "Höger"], horizontal=True, key=f"curve_{hole}_{p}")
                         if curve_type != "Rak":
@@ -647,18 +687,19 @@ with current_tab[1]:
                             telemetry_str += f"Det finns en {gap_width}m bred port/lucka {gap_dist}m bort. "
                         basket_pos = st.selectbox("Korgens läge", ["Normal", "Upphöjd", "På kulle (Risk för rull)", "Skymd"], key=f"bk_{hole}_{p}")
                         telemetry_str += f"Korgplacering: {basket_pos}. "
-                        # ---------------------------------
-
+                        
                         use_cam = st.checkbox("📸 Aktivera 'Helmet Cam'", key=f"cam_tog_{hole}_{p}")
                         img_data = None
                         if use_cam:
                             img_file = st.camera_input("Ta bild på banan", key=f"ci_{hole}_{p}")
                             if img_file: img_data = img_file.getvalue()
+                        
                         if st.button(f"🔊 Request Strategy ({p})", key=f"ai_btn_{hole}_{p}", type="primary"):
                             p_bag = st.session_state.inventory[st.session_state.inventory["Owner"]==p]
                             with st.spinner("Race Engineer analyzing data..."):
                                 advice = get_race_engineer_advice(p, p_bag, inf, st.session_state.weather_data, situation, dist_left, telemetry_str, img_data, form)
                                 st.session_state.hole_advice[f"{hole}_{p}"] = advice
+                        
                         if f"{hole}_{p}" in st.session_state.hole_advice: st.markdown(st.session_state.hole_advice[f"{hole}_{p}"], unsafe_allow_html=True)
                 st.divider()
                 c_sc1, c_sc2, c_disc = st.columns([1, 1, 3])
