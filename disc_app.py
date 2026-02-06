@@ -26,7 +26,7 @@ except ImportError:
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
 
-# SCUDERIA LIVERY CSS (HIGH VISIBILITY & CONTRAST)
+# SCUDERIA LIVERY CSS (ULTIMATE CONTRAST FIX)
 st.markdown("""
     <style>
     /* Main Background */
@@ -46,30 +46,34 @@ st.markdown("""
         border-right: 3px solid #fff200;
     }
     
-    /* Force Input Labels to be WHITE in Sidebar */
+    /* 1. Sidebar Labels (The text ABOVE the box) -> WHITE */
     section[data-testid="stSidebar"] label {
         color: #ffffff !important;
         font-weight: bold;
-        font-size: 14px;
     }
     
-    /* Force Markdown text in Sidebar to be WHITE */
-    section[data-testid="stSidebar"] p, section[data-testid="stSidebar"] span {
-        color: #ffffff !important;
-    }
-
-    /* Input Fields - White bg, Black text (Readable) */
+    /* 2. The Input Boxes & Dropdowns Background -> WHITE */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="input"] > div,
-    input { 
-        background-color: #ffffff !important; 
-        color: #000000 !important; 
-        border-color: #000000 !important; 
-        font-weight: bold; 
+    div[data-baseweb="base-input"] {
+        background-color: #ffffff !important;
+        border-color: #cccccc !important;
     }
-    /* Fix for dropdown text color */
-    .stSelectbox div[data-baseweb="select"] span {
-        color: #000000 !important; 
+
+    /* 3. The Text INSIDE the boxes (Selected Value) -> BLACK (CRITICAL FIX) */
+    div[data-baseweb="select"] span, 
+    div[data-baseweb="input"] input,
+    div[data-testid="stMarkdownContainer"] p {
+        color: #000000 !important; /* Force black text inside white boxes */
+    }
+    
+    /* Exception: Keep sidebar markdown text white (outside boxes) */
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important; 
+    }
+    /* Exception: The selected value in dropdown needs to be black */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] div[data-testid="stMarkdownContainer"] p {
+        color: #000000 !important;
     }
 
     /* Buttons */
@@ -174,7 +178,6 @@ def load_data_from_sheet():
         if users_df.empty: users_df = pd.DataFrame(columns=["Username", "PIN", "Role", "Active"])
         if "Municipality" not in users_df.columns: users_df["Municipality"] = "Unknown"
 
-        # UPDATED INVENTORY COLUMNS
         req_cols = ["Owner", "Modell", "Tillverkare", "Plast", "Typ", "Speed", "Glide", "Turn", "Fade", "Stabilitet", "Status"]
         try: ws_inv = sheet.worksheet("Inventory")
         except: ws_inv = sheet.add_worksheet("Inventory", 100, 11); ws_inv.append_row(req_cols)
@@ -307,57 +310,38 @@ def analyze_video_form(video_bytes):
     except Exception as e: return f"Video Error: {e}"
 
 def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist_left, telemetry_notes, image_bytes=None, form_factor=1.0):
-    # Only use discs IN THE BAG
     race_bag = bag_df[bag_df["Status"] == "Bag"]
-    if race_bag.empty: race_bag = bag_df # Fallback if empty bag
-    
-    # Create inventory string including plastic info
+    if race_bag.empty: race_bag = bag_df
     bag_str = ", ".join([f"{r['Modell']} ({r['Plast']})" for i, r in race_bag.iterrows()])
     
-    # THE FERRARI PROMPT 🏎️
     system_prompt = """
     You are a World Class F1-Level Race Engineer for Disc Golf (Scuderia Wonka).
-    
-    INPUT DATA:
-    - Distance to Basket
-    - Wind Conditions
-    - Player Form (Power Level) from Warm-up
-    - Disc Inventory (In the Bag)
-    
-    YOUR MISSION:
-    Calculate the optimal flight path and disc selection.
-    
-    OUTPUT FORMAT (HTML ONLY, STYLISH):
-    Use these icons: 📍, 🏎️, 🔮.
-    
+    INPUT DATA: Distance, Wind, Player Form, Inventory.
+    YOUR MISSION: Calculate optimal flight path and disc selection.
+    OUTPUT FORMAT (HTML ONLY, STYLISH): Use icons: 📍, 🏎️, 🔮.
     <div class="race-engineer-box">
         <div class="re-header">🏎️ SCUDERIA STRATEGY</div>
         <div class="re-row"><span class="re-label">📍 POSITION:</span> <span class="re-val">[Distance]m to Pin | Wind: [Wind] m/s</span></div>
         <div class="re-row"><span class="re-label">💿 RECOMMENDATION:</span> <span class="re-val"><b>[Disc Name]</b> ([Plastic])</span></div>
-        <div class="re-row"><span class="re-label">📐 FLIGHT PLAN:</span> <span class="re-val">[Release Angle] (e.g. 15° Hyzer) | [Power]% Thrust</span></div>
-        <div class="re-row"><span class="re-label">📝 TACTIC:</span> <span class="re-val">[Brief, sharp advice like 'Aim right of the tree, let stability fight back']</span></div>
+        <div class="re-row"><span class="re-label">📐 FLIGHT PLAN:</span> <span class="re-val">[Angle] | [Power]% Thrust</span></div>
+        <div class="re-row"><span class="re-label">📝 TACTIC:</span> <span class="re-val">[Sharp advice]</span></div>
         <hr style="border-color:#fff200;">
         <div class="re-prob">🔮 BIRDIE PROBABILITY: [XX]%</div>
     </div>
     """
-    
     user_content = f"""
     PLAYER: {player} (Form: {int(form_factor*100)}%)
     HOLE: {hole_info['l']}m, Par {hole_info['p']}, {hole_info['shape']}
-    LIE: {situation}, DISTANCE LEFT: {dist_left}m
-    WIND: {weather['wind']} m/s
+    LIE: {situation}, DIST: {dist_left}m, WIND: {weather['wind']} m/s
     NOTES: {telemetry_notes}
     BAG: {bag_str}
     """
-    
     msgs = [{"role": "system", "content": system_prompt}]
     content_payload = [{"type": "text", "text": user_content}]
-    
     if image_bytes:
         b64 = base64.b64encode(image_bytes).decode('utf-8')
         content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
         content_payload.append({"type": "text", "text": "VISUAL TELEMETRY: Analyze image for obstacles."})
-        
     msgs.append({"role": "user", "content": content_payload})
     return ask_ai(msgs)
 
@@ -417,7 +401,6 @@ if 'data_loaded' not in st.session_state:
         st.session_state.users = u
     st.session_state.data_loaded = True
 
-# Safety Check
 if st.session_state.get('logged_in') and not st.session_state.users.empty:
     if st.session_state.current_user not in st.session_state.users["Username"].values:
         st.session_state.logged_in = False
@@ -467,8 +450,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    # FORCE VISIBILITY OF USER NAME WITH HTML (Ferrari Yellow)
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v63.0 Grand Prix Engineer</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v64.0 Stable Multiplayer</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -479,9 +461,6 @@ with st.sidebar:
     # --- ADMIN: IMPERSONATION TOOL ---
     if st.session_state.user_role == "Admin":
         all_owners = st.session_state.inventory["Owner"].unique().tolist()
-        
-        # --- CRASH FIX START ---
-        # Ensure managed_user is in all_owners list to prevent ValueError in selectbox index
         if not all_owners: 
              st.session_state.managed_user = None 
              managed = None
@@ -492,28 +471,31 @@ with st.sidebar:
                     st.session_state.managed_user = st.session_state.current_user
                 else:
                     st.session_state.managed_user = all_owners[0]
-            
             try:
                 curr_idx = all_owners.index(st.session_state.managed_user)
             except ValueError:
                 curr_idx = 0
-                
             managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=curr_idx)
             st.session_state.managed_user = managed
-        # --- CRASH FIX END ---
     else:
         st.session_state.managed_user = st.session_state.current_user
 
-    # --- EVERYONE: TEAM SELECTION ---
+    # --- EVERYONE: TEAM SELECTION (MULTIPLAYER) ---
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
-    valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
-    if not valid_defaults and st.session_state.current_user in all_owners: valid_defaults = [st.session_state.current_user]
     
-    st.markdown("👥 **Team för dagen (Race/Warmup)**")
-    active_team = st.multiselect("Lägg till kompisar:", all_owners, default=valid_defaults)
+    # Ensure current user is always available to be selected/default
+    available_teammates = [p for p in all_owners if p != st.session_state.current_user]
     
-    if active_team != st.session_state.active_players:
-        st.session_state.active_players = active_team
+    st.markdown("👥 **Race Crew (Flera spelare)**")
+    # Multiselect for adding OTHERS. Current user is always implicit base.
+    added_teammates = st.multiselect("Lägg till kompisar:", available_teammates)
+    
+    # Combine Current User + Selected Friends
+    final_active_team = [st.session_state.current_user] + added_teammates
+    
+    # Update state if changed
+    if final_active_team != st.session_state.active_players:
+        st.session_state.active_players = final_active_team
         st.rerun()
 
     st.divider()
@@ -567,8 +549,11 @@ current_tab = st.tabs(tabs)
 # TAB 1: WARM-UP
 with current_tab[0]:
     st.header("🔥 Driving Range")
+    
     if st.session_state.active_players:
+        # Safe Selectbox for Thrower
         curr_thrower = st.selectbox("Vem kastar?", st.session_state.active_players)
+        
         p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_thrower]
         bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
         shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
@@ -594,6 +579,7 @@ with current_tab[0]:
                 if st.button("Rensa Session"): st.session_state.warmup_shots = []; st.rerun()
         if st.session_state.warmup_shots:
             st.divider()
+            # Calculate form for everyone
             for p in st.session_state.active_players:
                 p_shots = [s for s in st.session_state.warmup_shots if s['player'] == p]
                 if p_shots:
@@ -618,38 +604,37 @@ with current_tab[0]:
             ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
             ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
             handles, labels = ax.get_legend_handles_labels()
-            by_label = dict(zip(labels, handles))
-            ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
+            if labels:
+                by_label = dict(zip(labels, handles))
+                ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
             c2.pyplot(fig)
     else: st.info("Välj spelare i menyn.")
 
-# TAB 2: RACE (GRAND PRIX EDITION)
+# TAB 2: RACE
 with current_tab[1]:
     bana = st.session_state.selected_course
     c_data = st.session_state.courses[bana]
     st.subheader(f"🏁 Race Day: {bana}")
     
-    # FORCE AUTO-START IF LIST IS EMPTY
-    if not st.session_state.active_players:
-        st.session_state.active_players = [st.session_state.current_user]
-    
+    # Use the active team from sidebar
     active_racers = st.session_state.active_players
     
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
-        hole = st.selectbox("Korg #", holes) # RENAMED HÅL -> KORG
+        hole = st.selectbox("Korg #", holes)
         inf = c_data["holes"][hole]
         st.metric(f"Korg {hole}", f"{inf['l']}m", f"Par {inf['p']}"); st.caption(inf.get('shape', 'Rak'))
     with col_s:
-        # Init scores safety
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
         
+        # Ensure everyone has a score entry
         for p in active_racers:
             if p not in st.session_state.current_scores[hole]: st.session_state.current_scores[hole][p] = inf['p']
             if p not in st.session_state.selected_discs[hole]: st.session_state.selected_discs[hole][p] = None
         
+        # --- PLAYER COCKPITS (Loop through ALL active players) ---
         for p in active_racers:
             with st.expander(f"🏎️ {p} (Score: {st.session_state.current_scores[hole][p]})", expanded=True):
                 c_ghost, c_ai = st.columns([1, 2])
@@ -667,10 +652,10 @@ with current_tab[1]:
                     st.markdown(f"<div class='metric-box'><div class='metric-label'>HISTORIK</div><div class='metric-value'>{avg_score}</div><div class='metric-sub'>{delta} vs Par</div></div>", unsafe_allow_html=True)
                 with c_ai:
                     with st.container(border=True):
-                        st.markdown("**📻 TEAM RADIO (STRATEGY)**")
+                        st.markdown(f"**📻 TEAM RADIO ({p})**")
                         form = st.session_state.daily_forms.get(p, 1.0)
                         
-                        # TELEMETRY INPUTS
+                        # CONTROLS
                         c_sit1, c_sit2 = st.columns(2)
                         situation = c_sit1.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", label_visibility="collapsed")
                         dist_left = c_sit2.slider("Avstånd (m)", 0, 300, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
