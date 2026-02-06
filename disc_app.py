@@ -438,7 +438,7 @@ if not st.session_state.logged_in:
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
     # FORCE VISIBILITY OF USER NAME WITH HTML (Ferrari Yellow)
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v62.0 The Complete Package</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v62.1 Stabilized Core</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -449,12 +449,28 @@ with st.sidebar:
     # --- ADMIN: IMPERSONATION TOOL ---
     if st.session_state.user_role == "Admin":
         all_owners = st.session_state.inventory["Owner"].unique().tolist()
-        # LOGIC FIX: Always ensure managed_user is valid. If None, set to Self.
-        if not st.session_state.managed_user or st.session_state.managed_user not in all_owners:
-            st.session_state.managed_user = st.session_state.current_user
+        
+        # --- CRASH FIX START ---
+        # Ensure managed_user is in all_owners list to prevent ValueError in selectbox index
+        if not all_owners: 
+             st.session_state.managed_user = None 
+             managed = None
+             st.warning("Inga spelare med utrustning hittades.")
+        else:
+            if not st.session_state.managed_user or st.session_state.managed_user not in all_owners:
+                if st.session_state.current_user in all_owners:
+                    st.session_state.managed_user = st.session_state.current_user
+                else:
+                    st.session_state.managed_user = all_owners[0]
             
-        managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=all_owners.index(st.session_state.managed_user))
-        st.session_state.managed_user = managed
+            try:
+                curr_idx = all_owners.index(st.session_state.managed_user)
+            except ValueError:
+                curr_idx = 0
+                
+            managed = st.selectbox("🛠️ Hantera Profil (Admin)", all_owners, index=curr_idx)
+            st.session_state.managed_user = managed
+        # --- CRASH FIX END ---
     else:
         st.session_state.managed_user = st.session_state.current_user
 
@@ -617,8 +633,6 @@ with current_tab[1]:
                         c_sit1, c_sit2 = st.columns(2)
                         situation = c_sit1.radio("Läge", ["Tee", "Fairway", "Ruff", "Putt"], key=f"sit_{hole}_{p}", label_visibility="collapsed")
                         dist_left = c_sit2.slider("Avstånd (m)", 0, 300, int(inf['l']) if situation=="Tee" else 50, key=f"d_{hole}_{p}")
-                        
-                        # --- TELEMETRY CONTROLS (RESTORED) ---
                         telemetry_str = ""
                         curve_type = st.radio("Banans Form", ["Rak", "Vänster", "Höger"], horizontal=True, key=f"curve_{hole}_{p}")
                         if curve_type != "Rak":
@@ -631,8 +645,6 @@ with current_tab[1]:
                             telemetry_str += f"Det finns en {gap_width}m bred port/lucka {gap_dist}m bort. "
                         basket_pos = st.selectbox("Korgens läge", ["Normal", "Upphöjd", "På kulle (Risk för rull)", "Skymd"], key=f"bk_{hole}_{p}")
                         telemetry_str += f"Korgplacering: {basket_pos}. "
-                        # ---------------------------------------
-
                         use_cam = st.checkbox("📸 Aktivera 'Helmet Cam'", key=f"cam_tog_{hole}_{p}")
                         img_data = None
                         if use_cam:
