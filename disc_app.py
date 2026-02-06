@@ -26,30 +26,73 @@ except ImportError:
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
 
-# SCUDERIA LIVERY CSS
+# SCUDERIA LIVERY CSS (HIGH VISIBILITY)
 st.markdown("""
     <style>
-    /* Main Theme */
+    /* Main Background */
     .stApp { background-color: #b80000; color: #ffffff; }
-    h1, h2, h3, h4 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
     
-    /* SIDEBAR CONTRAST FIXES */
+    /* Headers - Force Yellow */
+    h1, h2, h3, h4, h5, h6 { 
+        color: #fff200 !important; 
+        font-family: 'Arial Black', sans-serif; 
+        text-transform: uppercase; 
+        text-shadow: 2px 2px 0px #000000; 
+    }
+    
+    /* Sidebar Specifics */
     section[data-testid="stSidebar"] { 
         background-color: #111111; 
         border-right: 3px solid #fff200;
-        color: #ffffff !important; /* Force general text white */
-    }
-    /* Make captions (user name etc) bright white and fully opaque */
-    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
-        color: #ffffff !important;
-        opacity: 1 !important;
-    }
-    /* Make standard text paragraphs in sidebar white */
-    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
-       color: #ffffff !important;
     }
     
-    /* Engineer Console Styling */
+    /* Force all text in sidebar to be visible */
+    section[data-testid="stSidebar"] p, 
+    section[data-testid="stSidebar"] span, 
+    section[data-testid="stSidebar"] label {
+        color: #ffffff !important;
+    }
+
+    /* Input Fields - White bg, Black text (Readable) */
+    div[data-baseweb="select"] > div, 
+    div[data-baseweb="input"] > div,
+    input { 
+        background-color: #ffffff !important; 
+        color: #000000 !important; 
+        border-color: #000000 !important; 
+        font-weight: bold; 
+    }
+    /* Fix for dropdown text color */
+    .stSelectbox div[data-baseweb="select"] span {
+        color: #000000 !important; 
+    }
+
+    /* Buttons */
+    div.stButton > button { 
+        background-color: #000000; 
+        color: #fff200; 
+        border: 2px solid #fff200; 
+        border-radius: 8px; 
+        font-weight: bold; 
+        text-transform: uppercase; 
+        padding: 0.5rem 1rem; 
+        width: 100%; 
+    }
+    div.stButton > button:hover { 
+        background-color: #fff200; 
+        color: #000000; 
+        border-color: #000000; 
+    }
+
+    /* Expander - Dark bg, White text */
+    .streamlit-expanderContent { 
+        background-color: #1a1a1a; 
+        color: white; 
+        border: 1px solid #fff200; 
+        border-radius: 0 0 5px 5px; 
+    }
+    
+    /* Engineer Console */
     .engineer-msg {
         background-color: #111111;
         border-left: 4px solid #fff200;
@@ -57,19 +100,25 @@ st.markdown("""
         margin-top: 10px;
         border-radius: 4px;
         font-family: 'Courier New', monospace;
+        color: white;
     }
-    .engineer-title { color: #fff200; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 8px;}
-    
-    /* Mobile Friendly Inputs */
-    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
-    div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div { background-color: #fff200 !important; color: #000000 !important; border-color: #000000 !important; font-weight: bold; }
-    input, .stSelectbox div[data-baseweb="select"] span { color: #000000 !important; }
-    
-    .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
+    .engineer-title { 
+        color: #fff200; 
+        font-weight: bold; 
+        text-transform: uppercase; 
+        border-bottom: 1px solid #333; 
+        margin-bottom: 8px;
+    }
     
     /* Metric Box */
-    .metric-box { background-color: #1a1a1a; border: 1px solid #fff200; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 10px; }
+    .metric-box { 
+        background-color: #1a1a1a; 
+        border: 1px solid #fff200; 
+        border-radius: 5px; 
+        padding: 10px; 
+        text-align: center; 
+        margin-bottom: 10px; 
+    }
     .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
     .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
     .metric-sub { font-size: 12px; color: #fff200; }
@@ -383,7 +432,8 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v60.2 High Contrast")
+    # FORCE VISIBILITY OF USER NAME WITH HTML
+    st.markdown(f"<div style='color: #fff200; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>👤 {st.session_state.current_user} | 🟢 v61.0 High Visibility</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -391,6 +441,7 @@ with st.sidebar:
     
     st.divider()
     
+    # --- ADMIN: IMPERSONATION TOOL ---
     if st.session_state.user_role == "Admin":
         all_owners = st.session_state.inventory["Owner"].unique().tolist()
         if not st.session_state.managed_user: st.session_state.managed_user = st.session_state.current_user
@@ -401,6 +452,7 @@ with st.sidebar:
     else:
         st.session_state.managed_user = st.session_state.current_user
 
+    # --- EVERYONE: TEAM SELECTION ---
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
     valid_defaults = [p for p in st.session_state.active_players if p in all_owners]
     if not valid_defaults and st.session_state.current_user in all_owners: valid_defaults = [st.session_state.current_user]
@@ -413,6 +465,8 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
+    
+    # 1. BANA & VÄDER
     course_names = list(st.session_state.courses.keys())
     st.markdown("**📍 Aktuell Bana (Race/Weather)**")
     sel_course = st.selectbox("Välj Bana", course_names, key="course_selector", label_visibility="collapsed")
@@ -460,10 +514,10 @@ current_tab = st.tabs(tabs)
 
 # TAB 1: WARM-UP
 with current_tab[0]:
-    st.header("🔥 Driving Range")
+    st.header(f"🔥 Driving Range")
     if st.session_state.active_players:
-        curr_p = st.selectbox("Kalibrera:", st.session_state.active_players)
-        p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
+        curr_thrower = st.selectbox("Vem kastar?", st.session_state.active_players)
+        p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_thrower]
         bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
         shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
         disc_options = ["Välj Disc"] + bag_discs + ["--- HYLLAN ---"] + shelf_discs
@@ -471,7 +525,7 @@ with current_tab[0]:
         c_in, c_list = st.columns([1, 1])
         with c_in:
             with st.container(border=True):
-                st.subheader("Registrera")
+                st.subheader(f"Registrera ({curr_thrower})")
                 sel_disc_name = st.selectbox("Disc", disc_options)
                 style = st.radio("Stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
                 c_d, c_s = st.columns(2)
@@ -480,7 +534,7 @@ with current_tab[0]:
                 if st.button("➕ Spara Kast", type="primary"):
                     if sel_disc_name != "Välj Disc" and "---" not in sel_disc_name and kast_len > 0:
                         d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
-                        st.session_state.warmup_shots.append({"player": curr_p, "disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"])})
+                        st.session_state.warmup_shots.append({"player": curr_thrower, "disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"])})
                         st.success("Sparat!")
         with c_list:
             if st.session_state.warmup_shots:
