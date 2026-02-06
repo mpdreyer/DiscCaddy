@@ -29,9 +29,25 @@ st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layou
 # SCUDERIA LIVERY CSS
 st.markdown("""
     <style>
+    /* Main Theme */
     .stApp { background-color: #b80000; color: #ffffff; }
     h1, h2, h3, h4 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
-    section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
+    
+    /* SIDEBAR CONTRAST FIXES */
+    section[data-testid="stSidebar"] { 
+        background-color: #111111; 
+        border-right: 3px solid #fff200;
+        color: #ffffff !important; /* Force general text white */
+    }
+    /* Make captions (user name etc) bright white and fully opaque */
+    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+        color: #ffffff !important;
+        opacity: 1 !important;
+    }
+    /* Make standard text paragraphs in sidebar white */
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
+       color: #ffffff !important;
+    }
     
     /* Engineer Console Styling */
     .engineer-msg {
@@ -367,7 +383,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v60.1 Pit Wall Patch")
+    st.caption(f"👤 {st.session_state.current_user} | 🟢 v60.2 High Contrast")
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
