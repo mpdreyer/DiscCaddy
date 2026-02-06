@@ -51,6 +51,12 @@ st.markdown("""
     input, .stSelectbox div[data-baseweb="select"] span { color: #000000 !important; }
     
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
+    
+    /* Metric Box */
+    .metric-box { background-color: #1a1a1a; border: 1px solid #fff200; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 10px; }
+    .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
+    .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
+    .metric-sub { font-size: 12px; color: #fff200; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -184,7 +190,6 @@ def analyze_image(image_bytes):
     try:
         b64 = base64.b64encode(image_bytes).decode('utf-8')
         client = OpenAI(api_key=st.secrets["openai_key"])
-        # Expanded Prompt for Material Science
         prompt = "Identifiera discen. Extrahera: Modell, Tillverkare, Plasttyp (t.ex. Star, Champion, K1). VIKTIGT OM TYP: Exakt 'Putter', 'Midrange', 'Fairway Driver', 'Distance Driver'. Svara JSON: {\"Modell\": \"Namn\", \"Tillverkare\": \"Innova\", \"Plast\": \"Star\", \"Typ\": \"Fairway Driver\", \"Speed\": 7.0, \"Glide\": 5.0, \"Turn\": 0.0, \"Fade\": 2.0}"
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=300)
         return res.choices[0].message.content
@@ -194,14 +199,7 @@ def inspect_disc_damage(image_bytes):
     try:
         b64 = base64.b64encode(image_bytes).decode('utf-8')
         client = OpenAI(api_key=st.secrets["openai_key"])
-        prompt = """
-        Du är en expert på material och aerodynamik för discgolf. 
-        Analysera bilden av denna disc (fokusera på kanter/rim).
-        1. Identifiera synliga skador (hack, skevhet, slitage).
-        2. Bedöm hur detta påverkar flygegenskaperna (t.ex. 'Hack i rimmen gör den mer understabil').
-        3. Ge en rekommendation (t.ex. 'Bra för rollers' eller 'Kassera').
-        Svara kort och tekniskt.
-        """
+        prompt = "Du är expert på discgolf-material. Analysera skador på rimmen. Bedöm hur flykten påverkas (t.ex. mer understabil). Rekommendera användning."
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=300)
         return res.choices[0].message.content
     except Exception as e: return f"Inspection Error: {e}"
@@ -221,7 +219,7 @@ def analyze_video_form(video_bytes):
         if len(frames) >= 3:
             key_frames = [frames[0], frames[len(frames)//2], frames[-1]]
             client = OpenAI(api_key=st.secrets["openai_key"])
-            content = [{"type": "text", "text": "Analysera denna discgolf-kast teknik. Ge 3 tips. Fokus: Reach back, Power pocket, Follow through."}]
+            content = [{"type": "text", "text": "Analysera denna discgolf-kast teknik. Ge 3 tips."}]
             for f in key_frames: content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{f}"}})
             res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": content}], max_tokens=500)
             return res.choices[0].message.content
@@ -236,7 +234,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     system_prompt = """
     Du är en Elit-Discgolf Strateg & Race Engineer. 
     Analysera telemetrin (kurvor, gap, avstånd) och väder.
-    Ta hänsyn till spelarens dagsform (Power Level) och discens plast/slitage.
+    Ta hänsyn till spelarens dagsform och discens plast/slitage.
     Svara kort, koncist och auktoritärt i denna HTML-struktur:
     <div class="engineer-msg">
     <div class="engineer-title">STRATEGI</div>
@@ -369,7 +367,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.caption(f"👤 {st.session_state.current_user} | 🟢 v60.0 Material Science")
+    st.caption(f"👤 {st.session_state.current_user} | 🟢 v60.1 Pit Wall Patch")
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -448,15 +446,16 @@ current_tab = st.tabs(tabs)
 with current_tab[0]:
     st.header("🔥 Driving Range")
     if st.session_state.active_players:
-        curr_thrower = st.selectbox("Vem kastar?", st.session_state.active_players)
-        p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_thrower]
+        curr_p = st.selectbox("Kalibrera:", st.session_state.active_players)
+        p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == curr_p]
         bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
         shelf_discs = p_inv[p_inv["Status"]=="Shelf"]["Modell"].tolist()
         disc_options = ["Välj Disc"] + bag_discs + ["--- HYLLAN ---"] + shelf_discs
+        
         c_in, c_list = st.columns([1, 1])
         with c_in:
             with st.container(border=True):
-                st.subheader(f"Registrera ({curr_thrower})")
+                st.subheader("Registrera")
                 sel_disc_name = st.selectbox("Disc", disc_options)
                 style = st.radio("Stil", ["Backhand (RHBH)", "Forehand (RHFH)"], horizontal=True)
                 c_d, c_s = st.columns(2)
@@ -465,40 +464,42 @@ with current_tab[0]:
                 if st.button("➕ Spara Kast", type="primary"):
                     if sel_disc_name != "Välj Disc" and "---" not in sel_disc_name and kast_len > 0:
                         d_data = p_inv[p_inv["Modell"]==sel_disc_name].iloc[0]
-                        st.session_state.warmup_shots.append({"player": curr_thrower, "disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"])})
+                        st.session_state.warmup_shots.append({"player": curr_p, "disc": sel_disc_name, "style": style, "len": kast_len, "side": kast_sida, "speed": float(d_data["Speed"])})
                         st.success("Sparat!")
-    with c_list:
+        with c_list:
+            if st.session_state.warmup_shots:
+                st.dataframe(pd.DataFrame(st.session_state.warmup_shots)[["player", "disc", "len", "side"]], hide_index=True, height=200)
+                if st.button("Rensa Session"): st.session_state.warmup_shots = []; st.rerun()
         if st.session_state.warmup_shots:
-            st.dataframe(pd.DataFrame(st.session_state.warmup_shots)[["player", "disc", "len", "side"]], hide_index=True, height=200)
-            if st.button("Rensa Session"): st.session_state.warmup_shots = []; st.rerun()
-    if st.session_state.warmup_shots:
-        st.divider()
-        for p in st.session_state.active_players:
-            p_shots = [s for s in st.session_state.warmup_shots if s['player'] == p]
-            if p_shots:
-                tot_pot = 0
-                for s in p_shots: opt_dist = max(s["speed"] * 10.0, 40.0); tot_pot += (s["len"] / opt_dist)
-                avg_form = tot_pot / len(p_shots)
-                st.session_state.daily_forms[p] = avg_form
-        st.subheader("📊 Session Stats")
-        cols = st.columns(len(st.session_state.active_players))
-        for i, p in enumerate(st.session_state.active_players):
-            f = st.session_state.daily_forms.get(p, 0)
-            if f > 0: cols[i].metric(p, f"Form: {int(f*100)}%")
-        fig, ax = plt.subplots(figsize=(6,3))
-        shots = st.session_state.warmup_shots
-        colors = plt.cm.rainbow(np.linspace(0, 1, len(st.session_state.active_players)))
-        p_map = {p: c for p, c in zip(st.session_state.active_players, colors)}
-        for s in shots:
-            ax.scatter(s["side"], s["len"], color=p_map.get(s["player"], 'white'), s=100, alpha=0.8, label=s["player"])
-        ax.axvline(0, c='white', ls='--')
-        ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
-        ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
-        handles, labels = ax.get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
-        c2.pyplot(fig)
-    else: st.info("Lägg till spelare i menyn till vänster.")
+            st.divider()
+            for p in st.session_state.active_players:
+                p_shots = [s for s in st.session_state.warmup_shots if s['player'] == p]
+                if p_shots:
+                    tot_pot = 0
+                    for s in p_shots: opt_dist = max(s["speed"] * 10.0, 40.0); tot_pot += (s["len"] / opt_dist)
+                    avg_form = tot_pot / len(p_shots)
+                    st.session_state.daily_forms[p] = avg_form
+            
+            st.subheader("📊 Session Stats")
+            cols = st.columns(len(st.session_state.active_players))
+            for i, p in enumerate(st.session_state.active_players):
+                f = st.session_state.daily_forms.get(p, 0)
+                if f > 0: cols[i].metric(p, f"Form: {int(f*100)}%")
+            
+            fig, ax = plt.subplots(figsize=(6,3))
+            shots = st.session_state.warmup_shots
+            colors = plt.cm.rainbow(np.linspace(0, 1, len(st.session_state.active_players)))
+            p_map = {p: c for p, c in zip(st.session_state.active_players, colors)}
+            for s in shots:
+                ax.scatter(s["side"], s["len"], color=p_map.get(s["player"], 'white'), s=100, alpha=0.8, label=s["player"])
+            ax.axvline(0, c='white', ls='--')
+            ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
+            ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
+            handles, labels = ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
+            c2.pyplot(fig)
+    else: st.info("Välj spelare i menyn.")
 
 # TAB 2: RACE
 with current_tab[1]:
