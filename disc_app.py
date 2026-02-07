@@ -29,25 +29,105 @@ st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layou
 # SCUDERIA LIVERY CSS
 st.markdown("""
     <style>
+    /* Main Background */
     .stApp { background-color: #b80000; color: #ffffff; }
-    h1, h2, h3, h4, h5, h6 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
-    section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
-    section[data-testid="stSidebar"] label { color: #ffffff !important; font-weight: bold; }
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {
-        background-color: #ffffff !important; color: #000000 !important; border-color: #cccccc !important;
+    
+    /* Headers - Force Yellow */
+    h1, h2, h3, h4, h5, h6 { 
+        color: #fff200 !important; 
+        font-family: 'Arial Black', sans-serif; 
+        text-transform: uppercase; 
+        text-shadow: 2px 2px 0px #000000; 
     }
-    input, .stSelectbox div[data-baseweb="select"] span, div[data-baseweb="tag"] span { color: #000000 !important; }
-    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
-    div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
-    .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
-    .race-engineer-box { background-color: #111111; border: 2px solid #fff200; border-radius: 8px; padding: 20px; margin-top: 15px; color: white; font-family: 'Courier New', monospace; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); }
+    
+    /* Sidebar Specifics */
+    section[data-testid="stSidebar"] { 
+        background-color: #111111; 
+        border-right: 3px solid #fff200;
+    }
+    
+    section[data-testid="stSidebar"] label {
+        color: #ffffff !important;
+        font-weight: bold;
+    }
+    
+    /* Input Boxes & Dropdowns - FORCE WHITE BG, BLACK TEXT */
+    div[data-baseweb="select"] > div, 
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="base-input"] {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border-color: #cccccc !important;
+    }
+    
+    input, 
+    .stSelectbox div[data-baseweb="select"] span,
+    div[data-baseweb="tag"] span {
+        color: #000000 !important;
+    }
+
+    /* Buttons */
+    div.stButton > button { 
+        background-color: #000000; 
+        color: #fff200; 
+        border: 2px solid #fff200; 
+        border-radius: 8px; 
+        font-weight: bold; 
+        text-transform: uppercase; 
+        padding: 0.5rem 1rem; 
+        width: 100%; 
+    }
+    div.stButton > button:hover { 
+        background-color: #fff200; 
+        color: #000000; 
+        border-color: #000000; 
+    }
+
+    /* Expander - Dark bg, White text */
+    .streamlit-expanderContent { 
+        background-color: #1a1a1a; 
+        color: white; 
+        border: 1px solid #fff200; 
+        border-radius: 0 0 5px 5px; 
+    }
+    
+    /* Race Engineer Output Box */
+    .race-engineer-box {
+        background-color: #111111;
+        border: 2px solid #fff200;
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 15px;
+        color: white;
+        font-family: 'Courier New', monospace;
+        box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+    }
     .re-header { color: #fff200; font-weight: bold; border-bottom: 1px solid #fff200; margin-bottom: 10px; font-size: 18px; }
     .re-row { margin-bottom: 8px; }
     .re-label { color: #aaaaaa; font-weight: bold; }
     .re-val { color: #ffffff; font-weight: normal; }
     .re-prob { color: #00ff00; font-weight: bold; font-size: 16px; }
-    .engineer-msg { background-color: #111111; border-left: 4px solid #fff200; padding: 15px; margin-top: 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: white; }
-    .metric-box { background-color: #1a1a1a; border: 1px solid #fff200; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 10px; }
+    
+    /* Engineer Console Styling */
+    .engineer-msg {
+        background-color: #111111;
+        border-left: 4px solid #fff200;
+        padding: 15px;
+        margin-top: 10px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+        color: white;
+    }
+
+    /* Metric Box */
+    .metric-box { 
+        background-color: #1a1a1a; 
+        border: 1px solid #fff200; 
+        border-radius: 5px; 
+        padding: 10px; 
+        text-align: center; 
+        margin-bottom: 10px; 
+    }
     .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
     .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
     .metric-sub { font-size: 12px; color: #fff200; }
@@ -59,7 +139,7 @@ SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 
 # --- MASTER COURSE LIST ---
 MASTER_COURSES = {
-    # --- KUNGSBACKA ZONE ---
+    # --- KUNGSBACKA ZONE (10 mil radie) ---
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Lygnevi (Sätila)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 80, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
@@ -132,6 +212,8 @@ def load_data_from_sheet():
             ws_courses = sheet.add_worksheet("Courses", 100, 5)
             ws_courses.append_row(["Name", "Lat", "Lon", "Holes_JSON"])
         course_data = ws_courses.get_all_records()
+        
+        # MERGE MASTER WITH DB COURSES
         courses_dict = MASTER_COURSES.copy()
         if course_data:
             for r in course_data:
@@ -278,85 +360,95 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (THE STRATEGIST RETURNS) ---
+# --- DYNAMIC SMART BAG (DEEP ANALYSIS EDITION v72.0) ---
 def generate_smart_bag(inventory, player, course_name, weather):
+    # 1. ANALYZE COURSE & CONDITIONS
     holes = st.session_state.courses[course_name]["holes"]
     lengths = [h["l"] for h in holes.values()]
     avg_len = sum(lengths) / len(lengths)
     max_len = max(lengths)
     
-    # 1. PROFILE ANALYSIS
-    is_short_tech = avg_len < 70
-    is_mixed = 70 <= avg_len <= 100 # The "Skatås" Zone
+    # Determine Specific Profile
+    # Kungsbacka/Åbyvallen/Lygnevi = often short/tech/park (avg < 80)
+    # Skatås/Ymer = Mixed/Wooded (avg 80-100)
+    # Ale Vit/Järva = Bomber (avg > 100 or max > 140)
+    
+    is_tech_short = avg_len < 75
+    is_mixed = 75 <= avg_len <= 100
     is_bomber = avg_len > 100 or max_len > 130
-    is_windy = weather['wind'] > 3.0 # Lowered threshold
+    is_windy = weather['wind'] > 3.0 # Reagerar redan vid 3 m/s
     
     p_inv = inventory[inventory["Owner"] == player]
     shelf = p_inv[p_inv["Status"] == "Shelf"]
     
     recommendations = []
+    recommended_ids = [] # Keep track to avoid duplicates
     
     if shelf.empty: return []
 
-    # --- CORE (Always) ---
-    # Putter
+    # --- FUNCTION TO ADD DISC SAFELY ---
+    def add_disc(df, sort_col, asc, role, reason, warmup):
+        if df.empty: return
+        # Try to find one not already added
+        for idx, row in df.sort_values(sort_col, ascending=asc).iterrows():
+            if idx not in recommended_ids:
+                recommendations.append({
+                    "idx": idx, "model": row["Modell"], 
+                    "role": role, "reason": reason, "warmup": warmup
+                })
+                recommended_ids.append(idx)
+                return # Only add one per call
+
+    # --- A. THE MANDATORY CORE (4 Discs) ---
     putters = shelf[shelf["Typ"] == "Putter"]
-    if not putters.empty:
-        pick = putters.sort_values("Speed", ascending=True).iloc[0]
-        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Core Putter", "reason": "För green och utkast.", "warmup": True})
+    add_disc(putters, "Speed", True, "Main Putter", "Nödvändig för hålning.", True)
+    
+    # Approach (Speed <= 4, High Fade)
+    approach = shelf[(shelf["Speed"] <= 4) & (shelf["Fade"] >= 2)]
+    add_disc(approach, "Fade", False, "Approach", "Säkra inspel / Forehand chip.", True)
 
-    # Fairway (Stable)
-    fairways = shelf[shelf["Typ"] == "Fairway Driver"]
-    if not fairways.empty:
-        pick = fairways.iloc[0] # Grab best available
-        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Fairway", "reason": "Arbetshästen.", "warmup": True})
-
-    # Midrange (Neutral)
+    # Neutral Mid
     mids = shelf[shelf["Typ"] == "Midrange"]
-    if not mids.empty:
-        pick = mids.iloc[0]
-        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Midrange", "reason": "Kontroll.", "warmup": True})
+    neutral_mids = mids[(mids["Turn"] >= -1) & (mids["Fade"] <= 2)]
+    add_disc(neutral_mids, "Glide", False, "Straight Mid", "Rak kontroll i tunnel.", True)
 
-    # --- COURSE SPECIFIC ---
-    if is_short_tech:
-        # Approach Disc (Low Speed, High Fade)
-        approach = shelf[(shelf["Speed"] <= 4) & (shelf["Fade"] >= 2)]
-        if not approach.empty:
-            pick = approach.iloc[0]
-            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Approach", "reason": "Korta banor kräver inspel.", "warmup": True})
+    # Stable Fairway (The Workhorse)
+    fairways = shelf[shelf["Typ"] == "Fairway Driver"]
+    stable_fws = fairways[(fairways["Turn"] >= -1) & (fairways["Turn"] <= 0.5)]
+    add_disc(stable_fws, "Glide", False, "Workhorse Fairway", "Din 'Go-To' driver.", True)
 
-    if is_mixed:
-        # Add a Utility Mid or Second Fairway
-        # Try to find a turnover disc (Understable)
-        turnover = shelf[shelf["Turn"] <= -1]
-        if not turnover.empty:
-            # Check overlap
-            if turnover.iloc[0].name not in [r['idx'] for r in recommendations]:
-                pick = turnover.iloc[0]
-                recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Turnover/Utility", "reason": "Blandad bana = blandade kurvor.", "warmup": False})
+    # --- B. "BAD DAY" INSURANCE (2 Discs) ---
+    # 1. Understable Mid (Easy distance / turnover)
+    us_mids = mids[mids["Turn"] <= -1]
+    add_disc(us_mids, "Turn", True, "Utility Mid (Understabil)", "Räddare för trötta armar / anhyzers.", False)
+
+    # 2. Understable Fairway (Scramble / Roller)
+    us_fairways = fairways[fairways["Turn"] <= -2]
+    add_disc(us_fairways, "Turn", True, "Utility Fairway (Flip)", "Om du måste scrambla eller kasta roller.", False)
+
+    # --- C. COURSE SPECIFIC (1-3 Discs) ---
+    if is_tech_short:
+        # Add a SECOND Approach disc (different stability or speed)
+        # Maybe a throwing putter (Speed 3) vs Zone (Speed 4)
+        throwing_putters = putters[putters["Speed"] >= 3]
+        add_disc(throwing_putters, "Glide", False, "Driving Putter", "Kungsbacka/Åby kräver precision från tee.", True)
+
+    if is_mixed or is_bomber:
+        # Add Distance Driver 1 (Control Distance)
+        drivers = shelf[shelf["Typ"] == "Distance Driver"]
+        add_disc(drivers, "Fade", False, "Distance (Control)", "Längd med fade.", True)
 
     if is_bomber:
-        # Distance Driver
+        # Add Distance Driver 2 (Max Glide / Bomber)
         drivers = shelf[shelf["Typ"] == "Distance Driver"]
-        if not drivers.empty:
-            pick = drivers.sort_values("Glide", ascending=False).iloc[0]
-            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Bomber", "reason": "Lång bana!", "warmup": True})
+        bombers = drivers[drivers["Turn"] <= -1] # Hyzerflip machines
+        add_disc(bombers, "Glide", False, "Max Distance", "Ale Vit kräver allt du har.", True)
 
-    # --- SAFETY & WEATHER ---
-    # Bad Day Saver (Understable) - ALWAYS ADD
-    flippy = shelf[shelf["Turn"] <= -2]
-    if not flippy.empty:
-        pick = flippy.sort_values("Turn", ascending=True).iloc[0]
-        if pick.name not in [r['idx'] for r in recommendations]:
-            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Räddaren", "reason": "När formen sviker.", "warmup": False})
-
-    # Wind Fighter
+    # --- D. WEATHER SPECIFIC ---
     if is_windy:
-        beef = shelf[shelf["Fade"] >= 2.5]
-        if not beef.empty:
-            pick = beef.sort_values("Speed", ascending=False).iloc[0]
-            if pick.name not in [r['idx'] for r in recommendations]:
-                recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Wind Fighter", "reason": f"Vind {weather['wind']} m/s!", "warmup": False})
+        # Find the beefiest disc available (Highest Fade + Speed)
+        beef = shelf[shelf["Fade"] >= 3]
+        add_disc(beef, "Speed", False, "Wind Fighter", f"Vind {weather['wind']} m/s! Kräv överstabilt.", False)
 
     return recommendations
 
@@ -436,7 +528,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v72.0 The Strategist Returns</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v72.0 Deep Analytics Edition</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
