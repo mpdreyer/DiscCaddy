@@ -46,7 +46,6 @@ st.markdown("""
         border-right: 3px solid #fff200;
     }
     
-    /* Sidebar Labels */
     section[data-testid="stSidebar"] label {
         color: #ffffff !important;
         font-weight: bold;
@@ -61,7 +60,6 @@ st.markdown("""
         border-color: #cccccc !important;
     }
     
-    /* Force text inside inputs/selects to be black */
     input, 
     .stSelectbox div[data-baseweb="select"] span,
     div[data-baseweb="tag"] span {
@@ -110,7 +108,7 @@ st.markdown("""
     .re-val { color: #ffffff; font-weight: normal; }
     .re-prob { color: #00ff00; font-weight: bold; font-size: 16px; }
     
-    /* Engineer Console Styling (Simple) */
+    /* Engineer Console Styling */
     .engineer-msg {
         background-color: #111111;
         border-left: 4px solid #fff200;
@@ -339,30 +337,117 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-def generate_smart_bag(inventory, player, course_name):
+# --- UPGRADED SMART BAG LOGIC (ADAPTIVE 4-8 DISCS) ---
+def generate_smart_bag(inventory, player, course_name, weather):
+    # ANALYZE TERRAIN
     holes = st.session_state.courses[course_name]["holes"]
-    lengths = [h["l"] for h in holes.values()]; max_len = max(lengths)
+    lengths = [h["l"] for h in holes.values()]
+    avg_len = sum(lengths) / len(lengths)
+    max_len = max(lengths)
+    
+    # DETERMINE PROFILE
+    is_short_tech = avg_len < 80 and max_len < 100
+    is_bomber_course = max_len > 110
+    is_windy = weather['wind'] > 4.0
+    
     p_inv = inventory[inventory["Owner"] == player]
     shelf = p_inv[p_inv["Status"] == "Shelf"]
-    pack_indices = []
+    
+    recommendations = []
+    
     if shelf.empty: return []
 
-    # Strategy: Find Understable (Bad Day Saver)
-    bad_day_savers = shelf[shelf["Turn"] < -1.0]
-    if not bad_day_savers.empty:
-        pack_indices.append(bad_day_savers.sort_values("Turn", ascending=True).iloc[0].name)
-    
-    # Strategy: Workhorse
-    workhorses = shelf[(shelf["Speed"] >= 4) & (shelf["Speed"] <= 8) & (shelf["Turn"] >= -1) & (shelf["Fade"] <= 3)]
-    if not workhorses.empty:
-         pack_indices.append(workhorses.sort_values("Glide", ascending=False).iloc[0].name)
+    # --- 1. CORE (MANDATORY) ---
+    # Primary Putter
+    putters = shelf[shelf["Typ"] == "Putter"]
+    if not putters.empty:
+        # Prefer Speed 3 for driving putters
+        pick = putters.sort_values("Speed", ascending=False).iloc[0]
+        recommendations.append({
+            "idx": pick.name, "model": pick["Modell"], 
+            "role": "Core Putter", "reason": "Din 'go-to' för hål och utkast.", "warmup": True
+        })
 
-    # Strategy: Wind Fighter
-    wind_fighters = shelf[shelf["Fade"] >= 2.5]
-    if not wind_fighters.empty:
-         pack_indices.append(wind_fighters.sort_values("Fade", ascending=False).iloc[0].name)
+    # Workhorse Fairway (Stable)
+    fairways = shelf[shelf["Typ"] == "Fairway Driver"]
+    stable_fws = fairways[(fairways["Turn"] >= -1) & (fairways["Turn"] <= 0.5)]
+    if not stable_fws.empty:
+        pick = stable_fws.sort_values("Glide", ascending=False).iloc[0]
+        recommendations.append({
+            "idx": pick.name, "model": pick["Modell"], 
+            "role": "Workhorse Driver", "reason": "Pålitlig rak driver för 70% av kasten.", "warmup": True
+        })
+    elif not fairways.empty:
+        # Fallback to any fairway
+        pick = fairways.iloc[0]
+        recommendations.append({
+            "idx": pick.name, "model": pick["Modell"], "role": "Fairway", "reason": "Bästa tillgängliga driver.", "warmup": True
+        })
 
-    return list(set(pack_indices))
+    # Neutral Midrange
+    mids = shelf[shelf["Typ"] == "Midrange"]
+    neutral_mids = mids[(mids["Turn"] >= -1.5) & (mids["Fade"] <= 2)]
+    if not neutral_mids.empty:
+        pick = neutral_mids.iloc[0]
+        recommendations.append({
+            "idx": pick.name, "model": pick["Modell"], 
+            "role": "Neutral Mid", "reason": "Rak kontroll och tunnel-hål.", "warmup": True
+        })
+
+    # --- 2. COURSE SPECIFIC ---
+    if is_short_tech:
+        # Need Approach disc (Overstable Putter/Mid)
+        approach = shelf[(shelf["Speed"] <= 4) & (shelf["Fade"] >= 3)]
+        if not approach.empty:
+            pick = approach.iloc[0]
+            recommendations.append({
+                "idx": pick.name, "model": pick["Modell"], 
+                "role": "Approach (Zon)", "reason": "Kungsbacka-special: Korta inspel som måste sitta.", "warmup": False
+            })
+        # Add another touch putter/mid if available
+        understable_mid = mids[mids["Turn"] <= -1]
+        if not understable_mid.empty:
+            pick = understable_mid.iloc[0]
+            recommendations.append({
+                "idx": pick.name, "model": pick["Modell"], 
+                "role": "Touch Mid", "reason": "Korta anhyzers runt träd.", "warmup": False
+            })
+
+    if is_bomber_course:
+        # Add Distance Drivers
+        dist_drivers = shelf[shelf["Typ"] == "Distance Driver"]
+        if not dist_drivers.empty:
+            # Max Distance (Glide)
+            bomber = dist_drivers.sort_values("Glide", ascending=False).iloc[0]
+            recommendations.append({
+                "idx": bomber.name, "model": bomber["Modell"], 
+                "role": "Max Distance", "reason": "Lång bana kräver snabba discar.", "warmup": True
+            })
+
+    # --- 3. WEATHER SPECIFIC ---
+    if is_windy:
+        # Need Beefy Driver
+        beef = shelf[shelf["Fade"] >= 3]
+        if not beef.empty:
+            pick = beef.sort_values("Speed", ascending=False).iloc[0]
+            recommendations.append({
+                "idx": pick.name, "model": pick["Modell"], 
+                "role": "Wind Fighter", "reason": f"Det blåser {weather['wind']} m/s! Du behöver denna.", "warmup": False
+            })
+
+    # --- 4. SAFETY VALVE (Bad Day Saver) ---
+    # Something very understable
+    flippy = shelf[shelf["Turn"] <= -2]
+    if not flippy.empty:
+        pick = flippy.sort_values("Turn", ascending=True).iloc[0]
+        # Only add if not already added
+        if pick.name not in [r['idx'] for r in recommendations]:
+            recommendations.append({
+                "idx": pick.name, "model": pick["Modell"], 
+                "role": "Räddaren", "reason": "Om formen sviker eller du är trött.", "warmup": False
+            })
+
+    return recommendations
 
 def simulate_flight(speed, glide, turn, fade, power_factor=1.0):
     eff_turn = turn - (power_factor - 1.0) * 2; eff_fade = fade + (1.0 - power_factor) * 2
@@ -440,7 +525,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v65.0 Pit Stop Repair</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v67.0 The Strategic Mind</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -473,24 +558,16 @@ with st.sidebar:
     # --- TEAM SELECTION (SAFE MULTIPLAYER) ---
     all_owners = st.session_state.inventory["Owner"].unique().tolist()
     if all_owners:
-        # Filter out current user from "Add Friend" list
         possible_teammates = [p for p in all_owners if p != st.session_state.current_user]
-        
         st.markdown("👥 **Race Crew (Flera Spelare)**")
-        
-        # Calculate defaults based on who is ALREADY in active_players (excluding self)
         current_friends = [p for p in st.session_state.active_players if p != st.session_state.current_user and p in possible_teammates]
-        
         added_friends = st.multiselect("Lägg till kompisar:", possible_teammates, default=current_friends)
-        
-        # Always include self + friends
         new_active_list = [st.session_state.current_user] + added_friends
-        
         if new_active_list != st.session_state.active_players:
             st.session_state.active_players = new_active_list
             st.rerun()
     else:
-        st.warning("Inga andra spelare hittades i databasen.")
+        st.warning("Inga andra spelare hittades.")
 
     st.divider()
     
@@ -606,7 +683,7 @@ with current_tab[1]:
     c_data = st.session_state.courses[bana]
     st.subheader(f"🏁 Race Day: {bana}")
     
-    # Safe Auto-Start if list is broken
+    # Safe Auto-Start
     if not st.session_state.active_players:
         st.session_state.active_players = [st.session_state.current_user]
     
@@ -723,23 +800,101 @@ with current_tab[3]:
     target_p = st.session_state.managed_user
     if not target_p: target_p = st.session_state.current_user
     st.header(f"🧳 Logistik: {target_p}")
+    
     with st.container(border=True):
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
         tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()), key="strat_course")
-        if c2.button("Generera"): st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc); st.rerun()
+        if c2.button("Generera"): 
+            st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc, st.session_state.weather_data)
+            st.rerun()
+            
         if st.session_state.suggested_pack:
-            pack_names = st.session_state.inventory.loc[st.session_state.suggested_pack, "Modell"].tolist()
-            c1.info(f"Föreslår dessa tillägg från hyllan: {', '.join(pack_names)}")
-            if c3.button("Verkställ", type="primary"):
-                st.session_state.inventory.loc[st.session_state.suggested_pack, "Status"] = "Bag"
-                save_to_sheet(st.session_state.inventory, "Inventory"); st.session_state.suggested_pack = []; st.success("Packat!"); st.rerun()
+            st.info("🤖 Föreslagna tillägg från hyllan:")
+            for rec in st.session_state.suggested_pack:
+                with st.container():
+                    cols = st.columns([3, 4, 1])
+                    cols[0].markdown(f"**{rec['model']}**")
+                    cols[0].caption(rec['role'])
+                    cols[1].markdown(f"_{rec['reason']}_")
+                    if rec['warmup']:
+                        cols[2].markdown("🔥 Warm-up")
+                    st.divider()
+
+            if st.button("Verkställ (Flytta till Bag)", type="primary"):
+                indices = [r['idx'] for r in st.session_state.suggested_pack]
+                st.session_state.inventory.loc[indices, "Status"] = "Bag"
+                save_to_sheet(st.session_state.inventory, "Inventory")
+                st.session_state.suggested_pack = []
+                st.success("Packat och klart!")
+                st.rerun()
+    
+    st.divider()
+    st.subheader("🛠️ Snabb-hantering (Bulk)")
+    
+    my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == target_p].copy()
+    c_shelf, c_bag = st.columns(2)
+    
+    with c_shelf:
+        st.markdown("🏠 **Hyllan**")
+        shelf_items = my_inv[my_inv["Status"] == "Shelf"]
+        if not shelf_items.empty:
+            shelf_items['Display'] = shelf_items['Modell'] + " (" + shelf_items['Plast'] + ")"
+            selected_shelf = st.multiselect("Välj att flytta till Bag:", shelf_items['Display'].tolist(), key="ms_shelf")
+            if st.button("➡️ Flytta till Bag"):
+                mask = shelf_items['Display'].isin(selected_shelf)
+                indices_to_move = shelf_items[mask].index
+                st.session_state.inventory.loc[indices_to_move, "Status"] = "Bag"
+                save_to_sheet(st.session_state.inventory, "Inventory")
+                st.rerun()
+        else:
+            st.caption("Tomt på hyllan.")
+
+    with c_bag:
+        st.markdown("🎒 **Bagen**")
+        bag_items = my_inv[my_inv["Status"] == "Bag"]
+        if not bag_items.empty:
+            bag_items['Display'] = bag_items['Modell'] + " (" + bag_items['Plast'] + ")"
+            selected_bag = st.multiselect("Välj att flytta till Hyllan:", bag_items['Display'].tolist(), key="ms_bag")
+            if st.button("⬅️ Flytta till Hylla"):
+                mask = bag_items['Display'].isin(selected_bag)
+                indices_to_move = bag_items[mask].index
+                st.session_state.inventory.loc[indices_to_move, "Status"] = "Shelf"
+                save_to_sheet(st.session_state.inventory, "Inventory")
+                st.rerun()
+        else:
+            st.caption("Bagen är tom.")
+            
+    st.divider()
+    
+    if not bag_items.empty:
+        st.subheader("📊 Bag Balance")
+        chart_data = bag_items[['Speed', 'Turn', 'Fade', 'Modell']].copy()
+        chart_data['Stability'] = chart_data['Turn'] + chart_data['Fade']
+        c = alt.Chart(chart_data).mark_circle(size=200).encode(
+            x=alt.X('Stability', title='Stabilitet (Turn + Fade)'),
+            y=alt.Y('Speed', title='Speed'),
+            color='Modell',
+            tooltip=['Modell', 'Speed', 'Turn', 'Fade']
+        ).properties(height=300)
+        st.altair_chart(c, use_container_width=True)
+
+    st.divider()
+    
+    st.subheader("📝 Databas-editor")
+    st.caption("Redigera värden direkt här.")
+    edited_df = st.data_editor(my_inv, num_rows="dynamic", use_container_width=True, hide_index=True)
+    if st.button("💾 Spara Ändringar"):
+        st.session_state.inventory = st.session_state.inventory[st.session_state.inventory["Owner"] != target_p]
+        st.session_state.inventory = pd.concat([st.session_state.inventory, edited_df], ignore_index=True)
+        save_to_sheet(st.session_state.inventory, "Inventory")
+        st.success("Sparat!")
+
     st.markdown("---")
     
-    # --- SKADEVERKSTAD ---
     with st.expander("🛠️ Besiktning & Skadekontroll"):
-        st.caption("Fota kanten på discen. AI bedömer skadan och hur den påverkar flykten.")
-        dmg_img = st.camera_input("Fota skada")
+        st.caption("Fota kanten på discen.")
+        dmg_img = st.camera_input("Fota skada", use_container_width=True)
         if dmg_img:
             if st.button("Analysera Skada"):
                 with st.spinner("Inspekterar..."):
@@ -747,37 +902,9 @@ with current_tab[3]:
                     st.markdown(f"<div class='engineer-msg'><b>DAMAGE REPORT</b><br>{report}</div>", unsafe_allow_html=True)
 
     st.markdown("---")
-    sort_mode = st.radio("Sortera på:", ["Speed", "Modell", "Typ"], horizontal=True)
-    my_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == target_p]
-    c_shelf = st.container(border=True); c_bag = st.container(border=True)
-    with c_shelf:
-        st.subheader("🏠 Hyllan")
-        shelf = my_inv[my_inv["Status"] == "Shelf"].sort_values(sort_mode)
-        if shelf.empty: st.caption("Tomt.")
-        else:
-            for idx, row in shelf.iterrows():
-                c_txt, c_btn, c_del = st.columns([3, 1, 0.5])
-                c_txt.text(f"{row['Modell']} ({row['Plast']}) [{int(row['Speed'])}/{int(row['Glide'])}/{int(row['Turn'])}/{int(row['Fade'])}]")
-                if c_btn.button("➡️", key=f"s2b_{idx}"):
-                    st.session_state.inventory.at[idx, "Status"] = "Bag"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-                if c_del.button("🗑️", key=f"del_s_{idx}"):
-                    st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-    with c_bag:
-        st.subheader("🎒 Bagen")
-        bag = my_inv[my_inv["Status"] == "Bag"].sort_values(sort_mode)
-        if bag.empty: st.caption("Tomt.")
-        else:
-            for idx, row in bag.iterrows():
-                c_btn, c_txt, c_del = st.columns([1, 3, 0.5])
-                if c_btn.button("⬅️", key=f"b2s_{idx}"):
-                    st.session_state.inventory.at[idx, "Status"] = "Shelf"; save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-                c_txt.text(f"{row['Modell']} ({row['Plast']})")
-                if c_del.button("🗑️", key=f"del_b_{idx}"):
-                    st.session_state.inventory = st.session_state.inventory.drop(idx); save_to_sheet(st.session_state.inventory, "Inventory"); st.rerun()
-    st.markdown("---")
-    with st.expander(f"➕ Lägg till ny disc för {target_p}"):
+    with st.expander(f"➕ Lägg till ny disc för {target_p} (AI Camera)"):
         if st.checkbox("Visa Kamera"):
-            img_file = st.camera_input("Fota discen")
+            img_file = st.camera_input("Fota discen", use_container_width=True)
             if img_file:
                 if st.button("🔍 Analysera"):
                     with st.spinner("AI jobbar..."):
