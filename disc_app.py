@@ -525,7 +525,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v67.0 The Strategic Mind</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v67.1 Hotfix - Camera Stability</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -672,8 +672,9 @@ with current_tab[0]:
             ax.set_facecolor('#1a1a1a'); fig.patch.set_facecolor('#1a1a1a')
             ax.tick_params(colors='white'); ax.spines['bottom'].set_color('white'); ax.spines['left'].set_color('white')
             handles, labels = ax.get_legend_handles_labels()
-            by_label = dict(zip(labels, handles))
-            ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
+            if labels:
+                by_label = dict(zip(labels, handles))
+                ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
             c2.pyplot(fig)
     else: st.info("Välj spelare i menyn.")
 
@@ -894,7 +895,7 @@ with current_tab[3]:
     
     with st.expander("🛠️ Besiktning & Skadekontroll"):
         st.caption("Fota kanten på discen.")
-        dmg_img = st.camera_input("Fota skada", use_container_width=True)
+        dmg_img = st.camera_input("Fota skada")
         if dmg_img:
             if st.button("Analysera Skada"):
                 with st.spinner("Inspekterar..."):
@@ -904,7 +905,7 @@ with current_tab[3]:
     st.markdown("---")
     with st.expander(f"➕ Lägg till ny disc för {target_p} (AI Camera)"):
         if st.checkbox("Visa Kamera"):
-            img_file = st.camera_input("Fota discen", use_container_width=True)
+            img_file = st.camera_input("Fota discen")
             if img_file:
                 if st.button("🔍 Analysera"):
                     with st.spinner("AI jobbar..."):
@@ -1117,3 +1118,4 @@ if st.session_state.user_role == "Admin":
                     st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
                     st.success(f"Importerade {len(nd)} rader!")
             except Exception as e: st.error(f"Fel: {e}")
+            
