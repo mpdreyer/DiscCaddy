@@ -36,37 +36,13 @@ st.markdown("""
     section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
     section[data-testid="stSidebar"] label { color: #ffffff !important; font-weight: bold; }
     
-    /* Input Boxes & Dropdowns - FORCE WHITE BG, BLACK TEXT */
-    div[data-baseweb="select"] > div, 
-    div[data-baseweb="input"] > div,
-    div[data-baseweb="base-input"] {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        border-color: #cccccc !important;
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {
+        background-color: #ffffff !important; color: #000000 !important; border-color: #cccccc !important;
     }
-    
-    input, 
-    .stSelectbox div[data-baseweb="select"] span,
-    div[data-baseweb="tag"] span {
-        color: #000000 !important;
-    }
+    input, .stSelectbox div[data-baseweb="select"] span, div[data-baseweb="tag"] span { color: #000000 !important; }
 
-    /* Buttons */
-    div.stButton > button { 
-        background-color: #000000; 
-        color: #fff200; 
-        border: 2px solid #fff200; 
-        border-radius: 8px; 
-        font-weight: bold; 
-        text-transform: uppercase; 
-        padding: 0.5rem 1rem; 
-        width: 100%; 
-    }
-    div.stButton > button:hover { 
-        background-color: #fff200; 
-        color: #000000; 
-        border-color: #000000; 
-    }
+    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
+    div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
 
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
     
@@ -89,17 +65,17 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST (GRAND TOUR EDITION) ---
+# --- MASTER COURSE LIST (CORRECTED) ---
 MASTER_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Lygnevi (Sätila)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 80, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
-    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 85, "p": 3, "shape": "Teknisk/Blandat"} for x in range(1,19)}},
+    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 75, "p": 3, "shape": "Teknisk/Kort"} for x in range(1,10)}}, # Set to 9 holes
     "Lindome (Spinnhallen)": {"lat": 57.578, "lon": 12.095, "holes": {str(x):{"l": 70, "p": 3, "shape": "Skog"} for x in range(1,10)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
     "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
     "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog/Teknisk"} for x in range(1,19)}},
-    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 145, "p": 4, "shape": "Pro/Lång"} for x in range(1,19)}},
+    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 150, "p": 4, "shape": "Pro/Lång"} for x in range(1,19)}}, # Increased length difficulty
     "Uspastorp": {"lat": 57.982, "lon": 12.148, "holes": {str(x):{"l": 90, "p": 3, "shape": "Blandat"} for x in range(1,19)}},
     "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
     "Gässlösa (Varberg)": {"lat": 57.106, "lon": 12.285, "holes": {str(x):{"l": 80, "p": 3, "shape": "Kuperat"} for x in range(1,19)}},
@@ -308,7 +284,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (MONTE CARLO SIMULATION) ---
+# --- UPGRADED SMART BAG LOGIC (MONTE CARLO v2 + DETAILED REASONS) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     p_inv = inventory[inventory["Owner"] == player]
@@ -316,51 +292,54 @@ def generate_smart_bag(inventory, player, course_name, weather):
     
     if shelf.empty: return []
     
-    # --- 1. THE SIMULATOR (Scoring Every Disc on Every Hole) ---
-    disc_scores = {idx: 0 for idx in shelf.index}
-    disc_reasons = {idx: [] for idx in shelf.index}
+    # 1. THE SIMULATOR (Analyze holes for fit)
+    disc_data = {idx: {"score": 0, "reasons": []} for idx in shelf.index}
     
     for h_id, h_data in holes.items():
         dist = h_data['l']
         shape = h_data.get('shape', 'Rak')
-        
-        # Calculate ideal disc stats
         ideal_speed = max(3, min(14, dist / 10.0))
         
         for idx, row in shelf.iterrows():
             score = 0
-            d_speed = row['Speed']
-            d_turn = row['Turn']
-            d_fade = row['Fade']
+            reason_tag = ""
             
-            # A. Distance Match
-            speed_diff = abs(d_speed - ideal_speed)
-            if speed_diff <= 1: score += 10
+            # Distance Match
+            speed_diff = abs(row['Speed'] - ideal_speed)
+            if speed_diff <= 1: 
+                score += 10
+                if dist > 100: reason_tag = "Längd"
             elif speed_diff <= 2: score += 5
             elif speed_diff > 5: score -= 5
             
-            # B. Shape Match
+            # Shape Match
             if "Vä" in shape or "Left" in shape:
-                if d_fade >= 2: score += 5
-                if d_turn > -1: score += 2
+                if row['Fade'] >= 2: 
+                    score += 5
+                    reason_tag = "Fade/Vänster"
             elif "Hö" in shape or "Right" in shape:
-                if d_turn <= -2: score += 8
-                elif d_turn <= -1: score += 4
+                if row['Turn'] <= -1: 
+                    score += 8
+                    reason_tag = "Turn/Höger"
             else: # Straight
-                if abs(d_turn + d_fade) < 2: score += 5
+                if abs(row['Turn'] + row['Fade']) < 1.5: 
+                    score += 5
+                    reason_tag = "Rak/Tunnel"
             
-            # C. Wind Modifier
-            if weather['wind'] > 5.0 and d_fade >= 3:
+            # Wind
+            if weather['wind'] > 5.0 and row['Fade'] >= 3:
                 score += 5
-            
-            # Accumulate
-            if score > 5:
-                disc_scores[idx] += score
-                disc_reasons[idx].append(h_id)
+                reason_tag = "Vind"
 
-    # --- 2. SELECTION (The Draft) ---
-    sorted_discs = sorted(disc_scores.items(), key=lambda item: item[1], reverse=True)
-    candidates = [x for x in sorted_discs if x[1] > 0]
+            if score > 5:
+                disc_data[idx]["score"] += score
+                if reason_tag: disc_data[idx]["reasons"].append(f"{h_id}")
+
+    # 2. SELECTION
+    # Sort by score
+    candidates = sorted(disc_data.items(), key=lambda x: x[1]["score"], reverse=True)
+    # Filter only positive scores
+    candidates = [c for c in candidates if c[1]["score"] > 0]
     
     recommendations = []
     selected_indices = []
@@ -369,47 +348,62 @@ def generate_smart_bag(inventory, player, course_name, weather):
     has_mid = False
     has_driver = False
     
-    def pick_disc(idx, role, reason):
+    def pick_disc(idx, role, specific_reason, force_warmup=False):
         if idx not in selected_indices:
             row = shelf.loc[idx]
+            
+            # Check Warmup Logic
+            do_warmup = force_warmup
+            if not do_warmup:
+                if "Putter" in role or "Mid" in role or "Workhorse" in role:
+                    do_warmup = True
+            
             recommendations.append({
                 "idx": idx, "model": row["Modell"], "role": role, 
-                "reason": reason, "warmup": "Putter" in role or "Mid" in role
+                "reason": specific_reason, "warmup": do_warmup
             })
             selected_indices.append(idx)
             return True
         return False
 
-    # Force pick best of each class first
-    for idx, score in candidates:
+    # A. CORE (Mandatory) - Pick best scorers in category
+    for idx, data in candidates:
         row = shelf.loc[idx]
         if not has_putter and row['Typ'] == "Putter":
-            if pick_disc(idx, "Main Putter", "Bästa puttern för banan."): has_putter = True
+            pick_disc(idx, "Main Putter", "Bästa puttern för banan.")
+            has_putter = True
         elif not has_mid and row['Typ'] == "Midrange":
-            if pick_disc(idx, "Core Mid", "Bästa midrangen för banan."): has_mid = True
+            pick_disc(idx, "Core Mid", "Bästa midrangen för banan.")
+            has_mid = True
         elif not has_driver and "Driver" in row['Typ']:
-            if pick_disc(idx, "Primary Driver", "Bästa drivern för banan."): has_driver = True
-            
-    # Fill the rest (Target 6-9 discs)
-    target_count = 9 if max([h['l'] for h in holes.values()]) > 100 else 6
-    
-    for idx, score in candidates:
+            pick_disc(idx, "Primary Driver", "Bästa drivern för banan.")
+            has_driver = True
+
+    # B. SPECIALISTS (Fill up to 9)
+    target_count = 9
+    for idx, data in candidates:
         if len(selected_indices) >= target_count: break
         
-        good_holes = disc_reasons[idx]
-        if len(good_holes) > 3:
-            reason_str = f"Toppval för {len(good_holes)} hål (t.ex. {', '.join(good_holes[:3])})."
-        elif len(good_holes) > 0:
-            reason_str = f"Specialist för hål {', '.join(good_holes)}."
-        else:
-            reason_str = "Bra all-round val."
-            
-        pick_disc(idx, "Selected by Simulation", reason_str)
+        row = shelf.loc[idx]
+        good_holes = data["reasons"]
         
-    # Safety Valve (Bad Day Saver)
+        # Craft Reason
+        if len(good_holes) > 0:
+            hole_str = ", ".join(good_holes[:3])
+            # Infer role from stats
+            if row['Turn'] <= -2: reason_text = f"För turnovers på hål {hole_str}."
+            elif row['Fade'] >= 3: reason_text = f"För skarpa svängar på hål {hole_str}."
+            elif row['Speed'] >= 11: reason_text = f"För max distans på hål {hole_str}."
+            else: reason_text = f"Passar bra för hål {hole_str}."
+        else:
+            reason_text = "Bra all-round val."
+            
+        pick_disc(idx, f"Specialist ({row['Typ']})", reason_text)
+        
+    # C. SAFETY VALVE (Bad Day Saver) - Always add one flippy disc
     flippy = shelf.sort_values("Turn", ascending=True).iloc[0] if not shelf.empty else None
     if flippy is not None and flippy.name not in selected_indices:
-         pick_disc(flippy.name, "Räddaren", "Om allt går fel (Bad Day Saver).")
+         pick_disc(flippy.name, "Räddaren (Understabil)", "När formen sviker eller du måste scrambla.", False)
 
     return recommendations
 
@@ -489,7 +483,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v73.0 Monte Carlo Caddy</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v73.1 The Race Engineer's Notebook</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
