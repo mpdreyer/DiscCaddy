@@ -32,22 +32,53 @@ st.markdown("""
     <style>
     .stApp { background-color: #b80000; color: #ffffff; }
     h1, h2, h3, h4, h5, h6 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
+    
     section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
     section[data-testid="stSidebar"] label { color: #ffffff !important; font-weight: bold; }
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {
-        background-color: #ffffff !important; color: #000000 !important; border-color: #cccccc !important;
+    
+    /* Input Boxes & Dropdowns - FORCE WHITE BG, BLACK TEXT */
+    div[data-baseweb="select"] > div, 
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="base-input"] {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border-color: #cccccc !important;
     }
-    input, .stSelectbox div[data-baseweb="select"] span, div[data-baseweb="tag"] span { color: #000000 !important; }
-    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
-    div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
+    
+    input, 
+    .stSelectbox div[data-baseweb="select"] span,
+    div[data-baseweb="tag"] span {
+        color: #000000 !important;
+    }
+
+    /* Buttons */
+    div.stButton > button { 
+        background-color: #000000; 
+        color: #fff200; 
+        border: 2px solid #fff200; 
+        border-radius: 8px; 
+        font-weight: bold; 
+        text-transform: uppercase; 
+        padding: 0.5rem 1rem; 
+        width: 100%; 
+    }
+    div.stButton > button:hover { 
+        background-color: #fff200; 
+        color: #000000; 
+        border-color: #000000; 
+    }
+
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
+    
     .race-engineer-box { background-color: #111111; border: 2px solid #fff200; border-radius: 8px; padding: 20px; margin-top: 15px; color: white; font-family: 'Courier New', monospace; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); }
     .re-header { color: #fff200; font-weight: bold; border-bottom: 1px solid #fff200; margin-bottom: 10px; font-size: 18px; }
     .re-row { margin-bottom: 8px; }
     .re-label { color: #aaaaaa; font-weight: bold; }
     .re-val { color: #ffffff; font-weight: normal; }
     .re-prob { color: #00ff00; font-weight: bold; font-size: 16px; }
+    
     .engineer-msg { background-color: #111111; border-left: 4px solid #fff200; padding: 15px; margin-top: 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: white; }
+    
     .metric-box { background-color: #1a1a1a; border: 1px solid #fff200; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 10px; }
     .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
     .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
@@ -63,7 +94,7 @@ MASTER_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Lygnevi (Sätila)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 80, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
-    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 65, "p": 3, "shape": "Teknisk/Kort"} for x in range(1,19)}},
+    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 85, "p": 3, "shape": "Teknisk/Blandat"} for x in range(1,19)}},
     "Lindome (Spinnhallen)": {"lat": 57.578, "lon": 12.095, "holes": {str(x):{"l": 70, "p": 3, "shape": "Skog"} for x in range(1,10)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
     "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
@@ -286,17 +317,15 @@ def generate_smart_bag(inventory, player, course_name, weather):
     if shelf.empty: return []
     
     # --- 1. THE SIMULATOR (Scoring Every Disc on Every Hole) ---
-    # We create a score for each disc based on how many holes it fits perfectly.
-    
     disc_scores = {idx: 0 for idx in shelf.index}
-    disc_reasons = {idx: [] for idx in shelf.index} # To store "Hole 1, 5, 9"
+    disc_reasons = {idx: [] for idx in shelf.index}
     
     for h_id, h_data in holes.items():
         dist = h_data['l']
         shape = h_data.get('shape', 'Rak')
         
-        # Calculate ideal disc stats for this hole
-        ideal_speed = max(3, min(14, dist / 10.0)) # Rough rule of thumb: Dist/10 = Speed
+        # Calculate ideal disc stats
+        ideal_speed = max(3, min(14, dist / 10.0))
         
         for idx, row in shelf.iterrows():
             score = 0
@@ -304,54 +333,42 @@ def generate_smart_bag(inventory, player, course_name, weather):
             d_turn = row['Turn']
             d_fade = row['Fade']
             
-            # A. Distance Match (Bell curve scoring)
-            # If hole is 150m, Speed 12-14 gets max points. Speed 3 gets 0.
-            # If hole is 60m, Speed 3-4 gets max points. Speed 12 gets negative.
+            # A. Distance Match
             speed_diff = abs(d_speed - ideal_speed)
             if speed_diff <= 1: score += 10
             elif speed_diff <= 2: score += 5
-            elif speed_diff > 5: score -= 5 # Punishment for wrong tool
+            elif speed_diff > 5: score -= 5
             
             # B. Shape Match
-            # Dogleg Left (RHBH) needs Fade.
-            # Dogleg Right (RHBH) needs Turn.
             if "Vä" in shape or "Left" in shape:
                 if d_fade >= 2: score += 5
                 if d_turn > -1: score += 2
             elif "Hö" in shape or "Right" in shape:
-                if d_turn <= -2: score += 8 # Premium on turnover
+                if d_turn <= -2: score += 8
                 elif d_turn <= -1: score += 4
             else: # Straight
-                if abs(d_turn + d_fade) < 2: score += 5 # Neutral stability
+                if abs(d_turn + d_fade) < 2: score += 5
             
             # C. Wind Modifier
             if weather['wind'] > 5.0 and d_fade >= 3:
-                score += 5 # Bonus for beefy discs in wind
+                score += 5
             
             # Accumulate
-            if score > 5: # Only count if it's actually a good fit
+            if score > 5:
                 disc_scores[idx] += score
                 disc_reasons[idx].append(h_id)
 
     # --- 2. SELECTION (The Draft) ---
-    # Select Top 8 discs based on simulation score
     sorted_discs = sorted(disc_scores.items(), key=lambda item: item[1], reverse=True)
-    
-    # Take top candidates (score > 0)
     candidates = [x for x in sorted_discs if x[1] > 0]
     
     recommendations = []
     selected_indices = []
     
-    # 2.1 Ensure Coverage (Mandatory Slots)
-    # We iterate through candidates and ensure we have at least 1 putter, 1 mid, 1 driver
     has_putter = False
     has_mid = False
     has_driver = False
     
-    final_picks = []
-    
-    # Helper to add
     def pick_disc(idx, role, reason):
         if idx not in selected_indices:
             row = shelf.loc[idx]
@@ -373,14 +390,12 @@ def generate_smart_bag(inventory, player, course_name, weather):
         elif not has_driver and "Driver" in row['Typ']:
             if pick_disc(idx, "Primary Driver", "Bästa drivern för banan."): has_driver = True
             
-    # 2.2 Fill the rest with highest scores (The Specialists)
-    # Target 6-9 discs depending on course length
+    # Fill the rest (Target 6-9 discs)
     target_count = 9 if max([h['l'] for h in holes.values()]) > 100 else 6
     
     for idx, score in candidates:
         if len(selected_indices) >= target_count: break
         
-        # Format reason string
         good_holes = disc_reasons[idx]
         if len(good_holes) > 3:
             reason_str = f"Toppval för {len(good_holes)} hål (t.ex. {', '.join(good_holes[:3])})."
@@ -391,8 +406,7 @@ def generate_smart_bag(inventory, player, course_name, weather):
             
         pick_disc(idx, "Selected by Simulation", reason_str)
         
-    # 2.3 Safety Valve (Bad Day Saver) - If not picked
-    # Find most understable disc on shelf
+    # Safety Valve (Bad Day Saver)
     flippy = shelf.sort_values("Turn", ascending=True).iloc[0] if not shelf.empty else None
     if flippy is not None and flippy.name not in selected_indices:
          pick_disc(flippy.name, "Räddaren", "Om allt går fel (Bad Day Saver).")
@@ -1061,3 +1075,6 @@ if st.session_state.user_role == "Admin":
                             nd.append({"Datum": raw_date, "Bana": r.get('CourseName', 'Unknown'), "Spelare": mn, "Hål": str(hi), "Resultat": int(h_score), "Par": 3, "Disc_Used": "Unknown"})
                 if nd:
                     new_hist = pd.concat([st.session_state.history, pd.DataFrame(nd)], ignore_index=True)
+                    st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
+                    st.success(f"Importerade {len(nd)} rader!")
+            except Exception as e: st.error(f"Fel: {e}")
