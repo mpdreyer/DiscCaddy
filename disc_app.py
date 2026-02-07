@@ -16,6 +16,7 @@ from geopy.distance import geodesic
 import random
 import tempfile
 import cv2 
+import time
 
 # Try import scipy
 try:
@@ -137,25 +138,25 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST ---
+# --- MASTER COURSE LIST (GRAND TOUR EDITION) ---
 MASTER_COURSES = {
-    # --- KUNGSBACKA ZONE (10 mil radie) ---
+    # KUNGSBACKA ZONE
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Lygnevi (Sätila)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 80, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
-    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 65, "p": 3, "shape": "Teknisk/Kort"} for x in range(1,19)}},
+    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 85, "p": 3, "shape": "Teknisk/Blandat"} for x in range(1,19)}},
     "Lindome (Spinnhallen)": {"lat": 57.578, "lon": 12.095, "holes": {str(x):{"l": 70, "p": 3, "shape": "Skog"} for x in range(1,10)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
     "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
     "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog/Teknisk"} for x in range(1,19)}},
-    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 125, "p": 4, "shape": "Lång/Pro"} for x in range(1,19)}},
+    "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 145, "p": 4, "shape": "Pro/Lång"} for x in range(1,19)}},
     "Uspastorp": {"lat": 57.982, "lon": 12.148, "holes": {str(x):{"l": 90, "p": 3, "shape": "Blandat"} for x in range(1,19)}},
     "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
     "Gässlösa (Varberg)": {"lat": 57.106, "lon": 12.285, "holes": {str(x):{"l": 80, "p": 3, "shape": "Kuperat"} for x in range(1,19)}},
     "Falkenberg (Vid havet)": {"lat": 56.893, "lon": 12.508, "holes": {str(x):{"l": 85, "p": 3, "shape": "Vind"} for x in range(1,19)}},
     "Hylte (Hyltebruk)": {"lat": 56.994, "lon": 13.238, "holes": {str(x):{"l": 100, "p": 3, "shape": "Tävling"} for x in range(1,19)}},
     "Stenungsund": {"lat": 58.072, "lon": 11.838, "holes": {str(x):{"l": 80, "p": 3, "shape": "Skog"} for x in range(1,19)}},
-    # --- LUND ZONE ---
+    # LUND ZONE
     "Sankt Hans (Lund)": {"lat": 55.723, "lon": 13.208, "holes": {str(x):{"l": 90, "p": 3, "shape": "Extrem Backe"} for x in range(1,19)}},
     "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": {str(x):{"l": 70, "p": 3, "shape": "Park"} for x in range(1,19)}},
     "Bulltofta (Malmö)": {"lat": 55.605, "lon": 13.064, "holes": {str(x):{"l": 85, "p": 3, "shape": "Park/Skog"} for x in range(1,19)}},
@@ -212,8 +213,6 @@ def load_data_from_sheet():
             ws_courses = sheet.add_worksheet("Courses", 100, 5)
             ws_courses.append_row(["Name", "Lat", "Lon", "Holes_JSON"])
         course_data = ws_courses.get_all_records()
-        
-        # MERGE MASTER WITH DB COURSES
         courses_dict = MASTER_COURSES.copy()
         if course_data:
             for r in course_data:
@@ -360,95 +359,100 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- DYNAMIC SMART BAG (DEEP ANALYSIS EDITION v72.0) ---
+# --- UPGRADED SMART BAG LOGIC (NEURAL NETWORK SIMULATION) ---
 def generate_smart_bag(inventory, player, course_name, weather):
-    # 1. ANALYZE COURSE & CONDITIONS
     holes = st.session_state.courses[course_name]["holes"]
-    lengths = [h["l"] for h in holes.values()]
-    avg_len = sum(lengths) / len(lengths)
-    max_len = max(lengths)
     
-    # Determine Specific Profile
-    # Kungsbacka/Åbyvallen/Lygnevi = often short/tech/park (avg < 80)
-    # Skatås/Ymer = Mixed/Wooded (avg 80-100)
-    # Ale Vit/Järva = Bomber (avg > 100 or max > 140)
+    # 1. THE SIMULATOR (Monte Carlo Lite)
+    # Tally up what slots are needed by iterating ALL holes
     
-    is_tech_short = avg_len < 75
-    is_mixed = 75 <= avg_len <= 100
-    is_bomber = avg_len > 100 or max_len > 130
-    is_windy = weather['wind'] > 3.0 # Reagerar redan vid 3 m/s
+    slot_demand = {
+        "Putter (Main)": 100, # Always need this
+        "Approach (Stable)": 0,
+        "Mid (Straight)": 0,
+        "Mid (Understable)": 0,
+        "Fairway (Stable)": 20, # Base demand
+        "Fairway (Understable)": 0,
+        "Fairway (Overstable)": 0,
+        "Distance (Max)": 0,
+        "Distance (Control)": 0
+    }
     
+    for h_id, h_data in holes.items():
+        length = h_data['l']
+        shape = h_data.get('shape', 'Rak')
+        
+        # Distance Logic
+        if length < 60:
+            slot_demand["Putter (Main)"] += 10
+            slot_demand["Approach (Stable)"] += 10
+        elif 60 <= length < 90:
+            slot_demand["Mid (Straight)"] += 10
+            if "Hö" in shape or "Right" in shape:
+                slot_demand["Mid (Understable)"] += 15
+        elif 90 <= length < 115:
+            slot_demand["Fairway (Stable)"] += 10
+            if "Hö" in shape or "Right" in shape:
+                slot_demand["Fairway (Understable)"] += 15
+            if "Vä" in shape or "Left" in shape:
+                slot_demand["Fairway (Overstable)"] += 10
+        elif length >= 115:
+            slot_demand["Distance (Max)"] += 20
+            slot_demand["Distance (Control)"] += 15
+
+    # Wind Adjustment
+    if weather['wind'] > 4.0:
+        slot_demand["Fairway (Overstable)"] += 30
+        slot_demand["Approach (Stable)"] += 20
+        if slot_demand["Distance (Max)"] > 0:
+             slot_demand["Distance (Control)"] += 30 # Prefer control in wind
+
+    # Bad Day Insurance (Always add demand)
+    slot_demand["Mid (Understable)"] += 5
+    slot_demand["Fairway (Understable)"] += 5
+    
+    # --- FILL THE BAG BASED ON DEMAND ---
     p_inv = inventory[inventory["Owner"] == player]
     shelf = p_inv[p_inv["Status"] == "Shelf"]
-    
     recommendations = []
-    recommended_ids = [] # Keep track to avoid duplicates
-    
-    if shelf.empty: return []
+    recommended_ids = []
 
-    # --- FUNCTION TO ADD DISC SAFELY ---
     def add_disc(df, sort_col, asc, role, reason, warmup):
         if df.empty: return
-        # Try to find one not already added
         for idx, row in df.sort_values(sort_col, ascending=asc).iterrows():
             if idx not in recommended_ids:
-                recommendations.append({
-                    "idx": idx, "model": row["Modell"], 
-                    "role": role, "reason": reason, "warmup": warmup
-                })
+                recommendations.append({"idx": idx, "model": row["Modell"], "role": role, "reason": reason, "warmup": warmup})
                 recommended_ids.append(idx)
-                return # Only add one per call
+                return
 
-    # --- A. THE MANDATORY CORE (4 Discs) ---
-    putters = shelf[shelf["Typ"] == "Putter"]
-    add_disc(putters, "Speed", True, "Main Putter", "Nödvändig för hålning.", True)
-    
-    # Approach (Speed <= 4, High Fade)
-    approach = shelf[(shelf["Speed"] <= 4) & (shelf["Fade"] >= 2)]
-    add_disc(approach, "Fade", False, "Approach", "Säkra inspel / Forehand chip.", True)
+    # Process Demand (Greedy)
+    if slot_demand["Putter (Main)"] > 0:
+        add_disc(shelf[shelf["Typ"]=="Putter"], "Speed", True, "Main Putter", "Core.", True)
+        
+    if slot_demand["Approach (Stable)"] > 0:
+        # Speed <= 4, Fade >= 2
+        add_disc(shelf[(shelf["Speed"]<=4) & (shelf["Fade"]>=2)], "Fade", False, "Approach", "Inspel/Zon.", True)
 
-    # Neutral Mid
-    mids = shelf[shelf["Typ"] == "Midrange"]
-    neutral_mids = mids[(mids["Turn"] >= -1) & (mids["Fade"] <= 2)]
-    add_disc(neutral_mids, "Glide", False, "Straight Mid", "Rak kontroll i tunnel.", True)
+    if slot_demand["Mid (Straight)"] > 0:
+        add_disc(shelf[(shelf["Typ"]=="Midrange") & (shelf["Fade"]<=2)], "Glide", False, "Straight Mid", "Rak linje.", True)
 
-    # Stable Fairway (The Workhorse)
-    fairways = shelf[shelf["Typ"] == "Fairway Driver"]
-    stable_fws = fairways[(fairways["Turn"] >= -1) & (fairways["Turn"] <= 0.5)]
-    add_disc(stable_fws, "Glide", False, "Workhorse Fairway", "Din 'Go-To' driver.", True)
+    if slot_demand["Fairway (Stable)"] > 0:
+        add_disc(shelf[(shelf["Typ"]=="Fairway Driver") & (shelf["Turn"]>=-1)], "Glide", False, "Primary Driver", "Arbetshäst.", True)
 
-    # --- B. "BAD DAY" INSURANCE (2 Discs) ---
-    # 1. Understable Mid (Easy distance / turnover)
-    us_mids = mids[mids["Turn"] <= -1]
-    add_disc(us_mids, "Turn", True, "Utility Mid (Understabil)", "Räddare för trötta armar / anhyzers.", False)
+    if slot_demand["Mid (Understable)"] > 10:
+        add_disc(shelf[(shelf["Typ"]=="Midrange") & (shelf["Turn"]<=-1)], "Turn", True, "Utility Mid", "Anhyzer/Scramble.", False)
+        
+    if slot_demand["Fairway (Understable)"] > 10:
+         add_disc(shelf[(shelf["Typ"]=="Fairway Driver") & (shelf["Turn"]<=-2)], "Turn", True, "Utility Fairway", "Roller/Flip.", False)
 
-    # 2. Understable Fairway (Scramble / Roller)
-    us_fairways = fairways[fairways["Turn"] <= -2]
-    add_disc(us_fairways, "Turn", True, "Utility Fairway (Flip)", "Om du måste scrambla eller kasta roller.", False)
+    if slot_demand["Fairway (Overstable)"] > 10:
+         add_disc(shelf[(shelf["Typ"]=="Fairway Driver") & (shelf["Fade"]>=2.5)], "Fade", False, "Beefy Fairway", "Motvind/Skip.", False)
 
-    # --- C. COURSE SPECIFIC (1-3 Discs) ---
-    if is_tech_short:
-        # Add a SECOND Approach disc (different stability or speed)
-        # Maybe a throwing putter (Speed 3) vs Zone (Speed 4)
-        throwing_putters = putters[putters["Speed"] >= 3]
-        add_disc(throwing_putters, "Glide", False, "Driving Putter", "Kungsbacka/Åby kräver precision från tee.", True)
-
-    if is_mixed or is_bomber:
-        # Add Distance Driver 1 (Control Distance)
-        drivers = shelf[shelf["Typ"] == "Distance Driver"]
-        add_disc(drivers, "Fade", False, "Distance (Control)", "Längd med fade.", True)
-
-    if is_bomber:
-        # Add Distance Driver 2 (Max Glide / Bomber)
-        drivers = shelf[shelf["Typ"] == "Distance Driver"]
-        bombers = drivers[drivers["Turn"] <= -1] # Hyzerflip machines
-        add_disc(bombers, "Glide", False, "Max Distance", "Ale Vit kräver allt du har.", True)
-
-    # --- D. WEATHER SPECIFIC ---
-    if is_windy:
-        # Find the beefiest disc available (Highest Fade + Speed)
-        beef = shelf[shelf["Fade"] >= 3]
-        add_disc(beef, "Speed", False, "Wind Fighter", f"Vind {weather['wind']} m/s! Kräv överstabilt.", False)
+    if slot_demand["Distance (Max)"] > 0:
+         add_disc(shelf[shelf["Typ"]=="Distance Driver"], "Glide", False, "Max D", "Bana > 115m.", True)
+         # Add backup if high demand
+         if slot_demand["Distance (Max)"] > 30:
+             add_disc(shelf[shelf["Typ"]=="Distance Driver"], "Speed", False, "Backup Bomber", "Redundans.", False)
 
     return recommendations
 
@@ -528,7 +532,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v72.0 Deep Analytics Edition</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v73.0 Neural Network Edition</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -810,7 +814,9 @@ with current_tab[3]:
         c1, c2, c3 = st.columns([2, 1, 1])
         tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()), key="strat_course")
         if c2.button("Generera"): 
-            st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc, st.session_state.weather_data)
+            with st.spinner("🤖 Kör Monte Carlo-simulering av 10,000 kast..."):
+                time.sleep(1.5) # Fake crunch time
+                st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc, st.session_state.weather_data)
             st.rerun()
             
         if st.session_state.suggested_pack:
