@@ -29,105 +29,25 @@ st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layou
 # SCUDERIA LIVERY CSS
 st.markdown("""
     <style>
-    /* Main Background */
     .stApp { background-color: #b80000; color: #ffffff; }
-    
-    /* Headers - Force Yellow */
-    h1, h2, h3, h4, h5, h6 { 
-        color: #fff200 !important; 
-        font-family: 'Arial Black', sans-serif; 
-        text-transform: uppercase; 
-        text-shadow: 2px 2px 0px #000000; 
+    h1, h2, h3, h4, h5, h6 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
+    section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
+    section[data-testid="stSidebar"] label { color: #ffffff !important; font-weight: bold; }
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {
+        background-color: #ffffff !important; color: #000000 !important; border-color: #cccccc !important;
     }
-    
-    /* Sidebar Specifics */
-    section[data-testid="stSidebar"] { 
-        background-color: #111111; 
-        border-right: 3px solid #fff200;
-    }
-    
-    section[data-testid="stSidebar"] label {
-        color: #ffffff !important;
-        font-weight: bold;
-    }
-    
-    /* Input Boxes & Dropdowns - FORCE WHITE BG, BLACK TEXT */
-    div[data-baseweb="select"] > div, 
-    div[data-baseweb="input"] > div,
-    div[data-baseweb="base-input"] {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        border-color: #cccccc !important;
-    }
-    
-    input, 
-    .stSelectbox div[data-baseweb="select"] span,
-    div[data-baseweb="tag"] span {
-        color: #000000 !important;
-    }
-
-    /* Buttons */
-    div.stButton > button { 
-        background-color: #000000; 
-        color: #fff200; 
-        border: 2px solid #fff200; 
-        border-radius: 8px; 
-        font-weight: bold; 
-        text-transform: uppercase; 
-        padding: 0.5rem 1rem; 
-        width: 100%; 
-    }
-    div.stButton > button:hover { 
-        background-color: #fff200; 
-        color: #000000; 
-        border-color: #000000; 
-    }
-
-    /* Expander - Dark bg, White text */
-    .streamlit-expanderContent { 
-        background-color: #1a1a1a; 
-        color: white; 
-        border: 1px solid #fff200; 
-        border-radius: 0 0 5px 5px; 
-    }
-    
-    /* Race Engineer Output Box */
-    .race-engineer-box {
-        background-color: #111111;
-        border: 2px solid #fff200;
-        border-radius: 8px;
-        padding: 20px;
-        margin-top: 15px;
-        color: white;
-        font-family: 'Courier New', monospace;
-        box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
-    }
+    input, .stSelectbox div[data-baseweb="select"] span, div[data-baseweb="tag"] span { color: #000000 !important; }
+    div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
+    div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
+    .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
+    .race-engineer-box { background-color: #111111; border: 2px solid #fff200; border-radius: 8px; padding: 20px; margin-top: 15px; color: white; font-family: 'Courier New', monospace; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); }
     .re-header { color: #fff200; font-weight: bold; border-bottom: 1px solid #fff200; margin-bottom: 10px; font-size: 18px; }
     .re-row { margin-bottom: 8px; }
     .re-label { color: #aaaaaa; font-weight: bold; }
     .re-val { color: #ffffff; font-weight: normal; }
     .re-prob { color: #00ff00; font-weight: bold; font-size: 16px; }
-    
-    /* Engineer Console Styling */
-    .engineer-msg {
-        background-color: #111111;
-        border-left: 4px solid #fff200;
-        padding: 15px;
-        margin-top: 10px;
-        border-radius: 4px;
-        font-family: 'Courier New', monospace;
-        color: white;
-    }
-
-    /* Metric Box */
-    .metric-box { 
-        background-color: #1a1a1a; 
-        border: 1px solid #fff200; 
-        border-radius: 5px; 
-        padding: 10px; 
-        text-align: center; 
-        margin-bottom: 10px; 
-    }
+    .engineer-msg { background-color: #111111; border-left: 4px solid #fff200; padding: 15px; margin-top: 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: white; }
+    .metric-box { background-color: #1a1a1a; border: 1px solid #fff200; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 10px; }
     .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
     .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
     .metric-sub { font-size: 12px; color: #fff200; }
@@ -137,9 +57,9 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST (GRAND TOUR EDITION - EXTENDED) ---
+# --- MASTER COURSE LIST ---
 MASTER_COURSES = {
-    # --- KUNGSBACKA ZONE (10 mil radie) ---
+    # --- KUNGSBACKA ZONE ---
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Lygnevi (Sätila)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 80, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
@@ -155,8 +75,7 @@ MASTER_COURSES = {
     "Falkenberg (Vid havet)": {"lat": 56.893, "lon": 12.508, "holes": {str(x):{"l": 85, "p": 3, "shape": "Vind"} for x in range(1,19)}},
     "Hylte (Hyltebruk)": {"lat": 56.994, "lon": 13.238, "holes": {str(x):{"l": 100, "p": 3, "shape": "Tävling"} for x in range(1,19)}},
     "Stenungsund": {"lat": 58.072, "lon": 11.838, "holes": {str(x):{"l": 80, "p": 3, "shape": "Skog"} for x in range(1,19)}},
-
-    # --- LUND ZONE (5 mil radie) ---
+    # --- LUND ZONE ---
     "Sankt Hans (Lund)": {"lat": 55.723, "lon": 13.208, "holes": {str(x):{"l": 90, "p": 3, "shape": "Extrem Backe"} for x in range(1,19)}},
     "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": {str(x):{"l": 70, "p": 3, "shape": "Park"} for x in range(1,19)}},
     "Bulltofta (Malmö)": {"lat": 55.605, "lon": 13.064, "holes": {str(x):{"l": 85, "p": 3, "shape": "Park/Skog"} for x in range(1,19)}},
@@ -213,8 +132,6 @@ def load_data_from_sheet():
             ws_courses = sheet.add_worksheet("Courses", 100, 5)
             ws_courses.append_row(["Name", "Lat", "Lon", "Holes_JSON"])
         course_data = ws_courses.get_all_records()
-        
-        # MERGE MASTER WITH DB COURSES (PREFER DB IF EXISTS, ELSE MASTER)
         courses_dict = MASTER_COURSES.copy()
         if course_data:
             for r in course_data:
@@ -361,16 +278,18 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (ADAPTIVE 4-8 DISCS) ---
+# --- UPGRADED SMART BAG LOGIC (THE STRATEGIST RETURNS) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     lengths = [h["l"] for h in holes.values()]
     avg_len = sum(lengths) / len(lengths)
     max_len = max(lengths)
     
-    is_short_tech = avg_len < 80 and max_len < 100
-    is_bomber_course = max_len > 110
-    is_windy = weather['wind'] > 6.0
+    # 1. PROFILE ANALYSIS
+    is_short_tech = avg_len < 70
+    is_mixed = 70 <= avg_len <= 100 # The "Skatås" Zone
+    is_bomber = avg_len > 100 or max_len > 130
+    is_windy = weather['wind'] > 3.0 # Lowered threshold
     
     p_inv = inventory[inventory["Owner"] == player]
     shelf = p_inv[p_inv["Status"] == "Shelf"]
@@ -379,57 +298,65 @@ def generate_smart_bag(inventory, player, course_name, weather):
     
     if shelf.empty: return []
 
-    # 1. CORE
+    # --- CORE (Always) ---
+    # Putter
     putters = shelf[shelf["Typ"] == "Putter"]
     if not putters.empty:
-        pick = putters.sort_values("Speed", ascending=False).iloc[0]
-        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Core Putter", "reason": "Din 'go-to' för hål och utkast.", "warmup": True})
+        pick = putters.sort_values("Speed", ascending=True).iloc[0]
+        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Core Putter", "reason": "För green och utkast.", "warmup": True})
 
+    # Fairway (Stable)
     fairways = shelf[shelf["Typ"] == "Fairway Driver"]
-    stable_fws = fairways[(fairways["Turn"] >= -1) & (fairways["Turn"] <= 0.5)]
-    if not stable_fws.empty:
-        pick = stable_fws.sort_values("Glide", ascending=False).iloc[0]
-        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Workhorse Driver", "reason": "Pålitlig rak driver.", "warmup": True})
-    elif not fairways.empty:
-        pick = fairways.iloc[0]
-        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Fairway", "reason": "Bästa tillgängliga driver.", "warmup": True})
+    if not fairways.empty:
+        pick = fairways.iloc[0] # Grab best available
+        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Fairway", "reason": "Arbetshästen.", "warmup": True})
 
+    # Midrange (Neutral)
     mids = shelf[shelf["Typ"] == "Midrange"]
-    neutral_mids = mids[(mids["Turn"] >= -1.5) & (mids["Fade"] <= 2)]
-    if not neutral_mids.empty:
-        pick = neutral_mids.iloc[0]
-        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Neutral Mid", "reason": "Rak kontroll och tunnel-hål.", "warmup": True})
+    if not mids.empty:
+        pick = mids.iloc[0]
+        recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Midrange", "reason": "Kontroll.", "warmup": True})
 
-    # 2. COURSE
+    # --- COURSE SPECIFIC ---
     if is_short_tech:
-        approach = shelf[(shelf["Speed"] <= 4) & (shelf["Fade"] >= 3)]
+        # Approach Disc (Low Speed, High Fade)
+        approach = shelf[(shelf["Speed"] <= 4) & (shelf["Fade"] >= 2)]
         if not approach.empty:
             pick = approach.iloc[0]
-            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Approach (Zon)", "reason": "Korta inspel som måste sitta.", "warmup": False})
-        understable_mid = mids[mids["Turn"] <= -1]
-        if not understable_mid.empty:
-            pick = understable_mid.iloc[0]
-            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Touch Mid", "reason": "Korta anhyzers runt träd.", "warmup": False})
+            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Approach", "reason": "Korta banor kräver inspel.", "warmup": True})
 
-    if is_bomber_course:
-        dist_drivers = shelf[shelf["Typ"] == "Distance Driver"]
-        if not dist_drivers.empty:
-            bomber = dist_drivers.sort_values("Glide", ascending=False).iloc[0]
-            recommendations.append({"idx": bomber.name, "model": bomber["Modell"], "role": "Max Distance", "reason": "Lång bana kräver snabba discar.", "warmup": True})
+    if is_mixed:
+        # Add a Utility Mid or Second Fairway
+        # Try to find a turnover disc (Understable)
+        turnover = shelf[shelf["Turn"] <= -1]
+        if not turnover.empty:
+            # Check overlap
+            if turnover.iloc[0].name not in [r['idx'] for r in recommendations]:
+                pick = turnover.iloc[0]
+                recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Turnover/Utility", "reason": "Blandad bana = blandade kurvor.", "warmup": False})
 
-    # 3. WEATHER
-    if is_windy:
-        beef = shelf[shelf["Fade"] >= 3]
-        if not beef.empty:
-            pick = beef.sort_values("Speed", ascending=False).iloc[0]
-            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Wind Fighter", "reason": f"Det blåser {weather['wind']} m/s! Du behöver denna.", "warmup": False})
+    if is_bomber:
+        # Distance Driver
+        drivers = shelf[shelf["Typ"] == "Distance Driver"]
+        if not drivers.empty:
+            pick = drivers.sort_values("Glide", ascending=False).iloc[0]
+            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Bomber", "reason": "Lång bana!", "warmup": True})
 
-    # 4. SAFETY
+    # --- SAFETY & WEATHER ---
+    # Bad Day Saver (Understable) - ALWAYS ADD
     flippy = shelf[shelf["Turn"] <= -2]
     if not flippy.empty:
         pick = flippy.sort_values("Turn", ascending=True).iloc[0]
         if pick.name not in [r['idx'] for r in recommendations]:
-            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Räddaren", "reason": "Om formen sviker eller du är trött.", "warmup": False})
+            recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Räddaren", "reason": "När formen sviker.", "warmup": False})
+
+    # Wind Fighter
+    if is_windy:
+        beef = shelf[shelf["Fade"] >= 2.5]
+        if not beef.empty:
+            pick = beef.sort_values("Speed", ascending=False).iloc[0]
+            if pick.name not in [r['idx'] for r in recommendations]:
+                recommendations.append({"idx": pick.name, "model": pick["Modell"], "role": "Wind Fighter", "reason": f"Vind {weather['wind']} m/s!", "warmup": False})
 
     return recommendations
 
@@ -509,7 +436,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v71.1 The Complete Map</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v72.0 The Strategist Returns</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
