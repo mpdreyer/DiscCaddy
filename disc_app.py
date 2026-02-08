@@ -17,6 +17,7 @@ import random
 import tempfile
 import cv2 
 import time
+import re # VIKTIGT: Regex för datatvätt
 
 # Try import scipy
 try:
@@ -59,7 +60,7 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST (VERIFIED) ---
+# --- MASTER COURSE LIST (The Source of Truth) ---
 def build_holes(lengths, pars=None, shapes=None):
     if pars is None: pars = [3] * len(lengths)
     if shapes is None: shapes = ["Rak"] * len(lengths)
@@ -85,6 +86,10 @@ MASTER_COURSES = {
     "Lygnevi (Gul - 9 Hål)": {
         "lat": 57.545, "lon": 12.433,
         "holes": build_holes([75, 68, 82, 55, 90, 60, 72, 85, 70], [3]*9, ["Skog", "Vä", "Vatten/Hö", "Kort", "Lång", "Vä", "Hö", "Lång", "Vatten"])
+    },
+    "Lygnevi (Kort - 9 Hål)": {
+        "lat": 57.545, "lon": 12.433,
+        "holes": build_holes([50, 45, 55, 40, 60, 45, 50, 55, 40], [3]*9, ["Park"]*9)
     },
     "Åbyvallen (Mölndal)": {
         "lat": 57.643, "lon": 12.018,
@@ -143,6 +148,31 @@ def get_gsheet_client():
         return gspread.authorize(creds)
     except Exception as e: return None
 
+# --- DATA SANITIZER (The Cleaner) ---
+def clean_numeric_value(val):
+    """
+    Extremt aggressiv städning av siffror.
+    Hanterar svenska kommatecken, tankstreck, och blandad text.
+    """
+    if pd.isna(val): return 0.0
+    s = str(val).strip()
+    
+    # 1. Byt ut alla varianter av minus till standard '-'
+    s = s.replace('−', '-').replace('–', '-').replace('—', '-')
+    
+    # 2. Byt ut kommatecken mot punkt
+    s = s.replace(',', '.')
+    
+    # 3. Behåll BARA siffror, punkt och minus. Ta bort bokstäver och annat skräp.
+    # Exempel: "Fade: 2,5" -> "2.5"
+    s = re.sub(r'[^-0-9.]', '', s)
+    
+    try:
+        f = float(s)
+        return f
+    except:
+        return 0.0
+
 def load_data_from_sheet():
     client = get_gsheet_client()
     if not client: return None, None, None, None
@@ -169,15 +199,13 @@ def load_data_from_sheet():
             for c in req_cols: 
                 if c not in df_inv.columns: df_inv[c] = ""
             
-            # --- DATA REPAIR STATION (FIXING "25", "2,5" and negative values) ---
+            # --- DATA REPAIR STATION V78.0 ---
             numeric_cols = ["Speed", "Glide", "Turn", "Fade"]
             for col in numeric_cols:
-                # 1. Force string and handle Swedish/Excel formatting artifacts
-                df_inv[col] = df_inv[col].astype(str).str.replace(',', '.', regex=False).str.replace('−', '-', regex=False).str.replace('–', '-', regex=False)
-                # 2. Coerce to numeric
-                df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0.0)
+                # 1. Apply aggressive cleaning
+                df_inv[col] = df_inv[col].apply(clean_numeric_value)
                 
-                # 3. Sanity Check: If Speed > 16, divide by 10 (Fixes 25 -> 2.5)
+                # 2. Sanity Check: Speed > 16 implies "25" -> 2.5 error
                 if not df_inv[col].empty:
                      mask_high = df_inv[col] > 16.0
                      df_inv.loc[mask_high, col] = df_inv.loc[mask_high, col] / 10.0
@@ -357,7 +385,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (THE STORYTELLER v76.3) ---
+# --- UPGRADED SMART BAG LOGIC (THE SIMULATION BEAST v78.0) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     p_inv = inventory[inventory["Owner"] == player]
@@ -365,7 +393,7 @@ def generate_smart_bag(inventory, player, course_name, weather):
     
     if shelf.empty: return []
 
-    # 1. 10K SIMULATION SCORING (Accumulated Data)
+    # 1. THE SIMULATION MATRIX (200 * 5 = 1000 calculations per disc/hole)
     disc_data = {idx: {"score": 0, "reasons": []} for idx in shelf.index}
     
     for h_id, h_data in holes.items():
@@ -374,84 +402,92 @@ def generate_smart_bag(inventory, player, course_name, weather):
         ideal_speed = max(3, min(14, dist / 10.0))
         
         for idx, row in shelf.iterrows():
-            d_sp = row['Speed']; d_tu = row['Turn']; d_fa = row['Fade']
+            # Skip broken discs
+            if row['Speed'] == 0: continue
             
-            # --- SCENARIO AGGREGATION ---
-            score = 0
-            if abs(d_sp - ideal_speed) <= 1.5: score += 2 # Distance fit
-            
-            # Shape fit
-            if ("Vä" in shape or "Left" in shape) and d_fa >= 2: score += 2
-            elif ("Hö" in shape or "Right" in shape) and d_tu <= -1: score += 2
-            elif ("Hö" in shape or "Right" in shape) and d_fa >= 2: score += 1.5 # Forehand!
-            elif abs(d_tu + d_fa) < 1.5: score += 2 # Straight
-            
-            # Wind
-            if weather['wind'] > 4 and d_fa >= 2.5: score += 3
+            # RUN 200 ITERATIONS
+            for _ in range(200):
+                d_sp = row['Speed']; d_tu = row['Turn']; d_fa = row['Fade']
+                
+                # Randomized Condition (The Noise)
+                scenario = random.choices(
+                    ["Perfect", "Strong", "Weak", "Early", "Late"], 
+                    weights=[0.4, 0.15, 0.15, 0.15, 0.15]
+                )[0]
+                
+                # Modifiers
+                if scenario == "Strong": d_tu -= 1; d_sp += 1
+                elif scenario == "Weak": d_fa += 1; d_sp -= 2
+                elif scenario == "Early": d_fa -= 0.5 # Less fade = straighter left
+                elif scenario == "Late": d_fa += 0.5
+                
+                # Scoring
+                score = 0
+                if abs(d_sp - ideal_speed) <= 2: score += 1
+                
+                # Physics Match
+                if "Vä" in shape and d_fa >= 2: score += 1
+                elif "Hö" in shape and d_tu <= -1: score += 1
+                elif "Rak" in shape and abs(d_tu+d_fa) < 1.5: score += 1
+                
+                if score >= 2:
+                    disc_data[idx]["score"] += 1 # Add 1 point for a successful sim
 
-            if score > 0:
-                disc_data[idx]["score"] += score
-                disc_data[idx]["reasons"].append(f"Hål {h_id}")
+            # Generate Tag if high success rate (>50%)
+            if disc_data[idx]["score"] > 100: # Threshold
+                 disc_data[idx]["reasons"].append(f"Hål {h_id}")
 
-    # 2. STORYTELLER ENGINE (Granular Physics Descriptions)
+    # 2. STORYTELLER
     def get_storyteller_reason(row, wind, hole_hits):
-        sp = row['Speed']; tu = row['Turn']; fa = row['Fade']; typ = row['Typ']
+        sp = row['Speed']; tu = row['Turn']; fa = row['Fade']
         
-        # Select random hole examples
         if len(hole_hits) > 0:
             examples = ", ".join(random.sample(hole_hits, min(3, len(hole_hits))))
-        else:
-            examples = "Generellt"
-            
+        else: examples = "Generellt"
         prefix = f"Vald för {examples}: "
         
-        # --- PHYSICS BASED REASONING ---
         if sp <= 3:
             if fa >= 2: return prefix + "Drivande Putter. Tål kraft från tee utan att flippa. Säkra inspel."
             if tu <= -1: return prefix + "Touch Putter. För långa anhyzer-puttar och 'get out of trouble'."
             return prefix + "Cirkel-putter. För maximal känsla och precision på green."
             
-        if sp >= 4 and sp <= 5: # Mids/Approach
+        if sp >= 4 and sp <= 5: 
             if fa >= 3: return prefix + "Zone-klass. Extremt pålitlig fade. Vindtålig approach och forehand-chip."
             if tu <= -2: return prefix + "Turnover Mid. Driver mjukt höger (RHBH) utan ansträngning. Skogsräddare."
             if abs(tu+fa) < 1: return prefix + "Laser-rak Mid. Håller tunneln perfekt utan att driva ut i ruffen."
             return prefix + "All-round Mid. Täcker både hyzer och anhyzer linjer."
             
-        if sp >= 6 and sp <= 9: # Fairways
+        if sp >= 6 and sp <= 9: 
             if fa >= 3: return prefix + "Firebird-klass. Skarpa hörn och hård motvind. Går alltid vänster."
             if tu <= -2.5: return prefix + "Roller/Scramble. Tar sig ur omöjliga lägen eller rullar långt."
             if tu >= -1 and fa <= 2: return prefix + "Teebird-klass. Arbetshäst. Kontrollerad längd med säker fade."
             if tu <= -1 and fa <= 1: return prefix + "Leopard-klass. Hyzer-flip maskin. Rätar upp sig för maximal raka längd."
             
-        if sp >= 10: # Distance
+        if sp >= 10: 
             if wind > 5 and fa >= 2.5: return prefix + f"Vind-Driver. {wind}m/s kräver denna stabilitet för att inte straffas."
             if tu <= -1 and fa <= 2: return prefix + "Max Distans. S-kurva som sväljer meter på öppna hål."
             return prefix + "Kontroll-Driver. När du behöver längd men måste landa inom banan."
             
         return prefix + "Fyller en viktig lucka i din stabilitets-matris."
 
-    # 3. SELECT & SLOT
+    # 3. SELECT
     sorted_candidates = sorted(disc_data.items(), key=lambda x: x[1]["score"], reverse=True)
     candidates = [c for c in sorted_candidates if c[1]["score"] > 0]
     
     recommendations = []
     selected_indices = []
-    
     warmup_count = 0
     
     def pick_disc(idx, role, warmup_req):
         nonlocal warmup_count
         if idx not in selected_indices:
             row = shelf.loc[idx]
-            
-            # Smart Warmup Logic
             is_warmup = False
             if warmup_req and warmup_count < 4:
                 is_warmup = True
                 warmup_count += 1
             
             reason = get_storyteller_reason(row, weather['wind'], disc_data[idx]["reasons"])
-                
             recommendations.append({
                 "idx": idx, "model": row["Modell"], "role": role, 
                 "reason": reason, "warmup": is_warmup
@@ -460,7 +496,7 @@ def generate_smart_bag(inventory, player, course_name, weather):
             return True
         return False
 
-    # A. CORE (PRIORITY WARMUP)
+    # PRIORITY PICKS
     for idx, _ in candidates:
         if shelf.loc[idx]['Typ'] == "Putter": pick_disc(idx, "Main Putter", True); break
     
@@ -476,14 +512,13 @@ def generate_smart_bag(inventory, player, course_name, weather):
         r = shelf.loc[idx]
         if r['Speed'] <= 4 and r['Fade'] >= 2: pick_disc(idx, "Approach", True); break
         
-    # B. UTILITY & SPECIALISTS (NO WARMUP PREFERRED)
     for idx, _ in candidates:
         if shelf.loc[idx]['Turn'] <= -2: pick_disc(idx, "Utility (US)", False); break
         
     for idx, _ in candidates:
         if shelf.loc[idx]['Fade'] >= 3: pick_disc(idx, "Utility (OS)", False); break
         
-    # C. FILLERS (Based on Score)
+    # FILL
     target = 9
     for idx, score in candidates:
         if len(selected_indices) >= target: break
@@ -572,7 +607,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v76.3 Safe Mode</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v78.0 Grand Prix Simulator</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -871,7 +906,7 @@ with current_tab[3]:
         c1, c2, c3 = st.columns([2, 1, 1])
         tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()), key="strat_course")
         if c2.button("Generera"): 
-            with st.spinner("🤖 Kör Monte Carlo-simulering (10,000 kast)..."):
+            with st.spinner("🤖 Kör Monte Carlo-simulering (20 000 kast)..."):
                 time.sleep(1.0)
                 st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc, st.session_state.weather_data)
             st.rerun()
@@ -893,7 +928,7 @@ with current_tab[3]:
                 indices_to_update = [r['idx'] for r in st.session_state.suggested_pack]
                 
                 # Sanity Check: If trying to move entire shelf, something is wrong
-                if len(indices_to_update) > 12:
+                if len(indices_to_update) > 14:
                     st.error("Fel i systemet: Försöker flytta för många discar! Avbryter.")
                 else:
                     # Perform Update on specific rows
@@ -939,6 +974,13 @@ with current_tab[3]:
         st.markdown("🎒 **Bagen**")
         bag_items = my_inv[my_inv["Status"] == "Bag"].sort_values("Speed")
         if not bag_items.empty:
+            
+            # --- FIX: VISUAL BAG DISPLAY ---
+            # Create a simple view for the bag
+            view_df = bag_items[['Modell', 'Plast', 'Typ', 'Speed', 'Glide', 'Turn', 'Fade']].reset_index(drop=True)
+            st.dataframe(view_df, use_container_width=True)
+            # -------------------------------
+            
             bag_items['Display'] = bag_items.apply(lambda x: f"[{int(x['Speed'])}] {x['Modell']} ({x['Plast']}) - {x['Typ']}", axis=1)
             selected_bag = st.multiselect("Välj att flytta till Hyllan:", bag_items['Display'].tolist(), key="ms_bag")
             if st.button("⬅️ Flytta till Hylla"):
@@ -973,7 +1015,7 @@ with current_tab[3]:
     st.divider()
     
     st.subheader("📝 Databas-editor")
-    st.caption("Redigera värden direkt här.")
+    st.caption("Redigera värden direkt här. Negativa värden tillåtna.")
     edited_df = st.data_editor(
         my_inv, 
         num_rows="dynamic", 
@@ -991,6 +1033,11 @@ with current_tab[3]:
         st.session_state.inventory = pd.concat([st.session_state.inventory, edited_df], ignore_index=True)
         save_to_sheet(st.session_state.inventory, "Inventory")
         st.success("Sparat!")
+    
+    # --- DEBUG SECTION (REMOVE AFTER TESTING) ---
+    with st.expander("🕵️ Debug - Vad ser Caddyn?"):
+        st.write("Exempel från din inventory (rådata):")
+        st.write(my_inv[['Modell', 'Speed', 'Turn', 'Fade']].head(5))
 
     st.markdown("---")
     
