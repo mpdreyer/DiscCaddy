@@ -59,7 +59,7 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST (CORRECTED & DETAILED) ---
+# --- MASTER COURSE LIST ---
 def build_holes(lengths, pars=None, shapes=None):
     if pars is None: pars = [3] * len(lengths)
     if shapes is None: shapes = ["Rak"] * len(lengths)
@@ -119,7 +119,6 @@ MASTER_COURSES = {
         )
     }
 }
-# (Additional courses like Ymer, Lindome etc are implicitly handled if added to MASTER_COURSES structure as needed)
 
 @st.cache_resource
 def get_gsheet_client():
@@ -154,8 +153,20 @@ def load_data_from_sheet():
         else:
             for c in req_cols: 
                 if c not in df_inv.columns: df_inv[c] = ""
-            for col in ["Speed", "Glide", "Turn", "Fade"]: 
+            
+            # --- DATA REPAIR STATION (FIXING "25" and "2,5") ---
+            numeric_cols = ["Speed", "Glide", "Turn", "Fade"]
+            for col in numeric_cols:
+                # 1. Force string and replace comma with dot
+                df_inv[col] = df_inv[col].astype(str).str.replace(',', '.', regex=False)
+                # 2. Coerce to numeric
                 df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0.0)
+                # 3. Logic check: If Speed > 16, divide by 10 (Fixes 25 -> 2.5)
+                # Apply only if the column is NOT empty
+                if not df_inv[col].empty:
+                     mask_high = df_inv[col] > 16.0
+                     df_inv.loc[mask_high, col] = df_inv.loc[mask_high, col] / 10.0
+            
             if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
             df_inv["Status"] = df_inv["Status"].fillna("Shelf")
 
@@ -170,7 +181,6 @@ def load_data_from_sheet():
             ws_courses.append_row(["Name", "Lat", "Lon", "Holes_JSON"])
         course_data = ws_courses.get_all_records()
         
-        # Default to MASTER, overwrite if DB has data (Logic changed below to allow reset)
         courses_dict = MASTER_COURSES.copy()
         if course_data:
             for r in course_data:
@@ -412,6 +422,7 @@ def generate_smart_bag(inventory, player, course_name, weather):
     recommendations = []
     selected_indices = []
     
+    # Track Warmup slots (Max 4)
     warmup_count = 0
     
     def pick_disc(idx, role, warmup_req):
@@ -436,25 +447,31 @@ def generate_smart_bag(inventory, player, course_name, weather):
         return False
 
     # A. CORE (PRIORITY WARMUP)
+    # 1. Main Putter
     for idx, _ in candidates:
         if shelf.loc[idx]['Typ'] == "Putter": pick_disc(idx, "Main Putter", True); break
     
+    # 2. Straight Mid
     for idx, _ in candidates:
         r = shelf.loc[idx]
         if r['Typ'] == "Midrange" and abs(r['Turn']+r['Fade']) < 2: pick_disc(idx, "Straight Mid", True); break
 
+    # 3. Workhorse Driver
     for idx, _ in candidates:
         r = shelf.loc[idx]
         if r['Speed'] >= 6 and r['Speed'] <= 9 and r['Turn'] >= -1: pick_disc(idx, "Workhorse", True); break
 
+    # 4. Approach
     for idx, _ in candidates:
         r = shelf.loc[idx]
         if r['Speed'] <= 4 and r['Fade'] >= 2: pick_disc(idx, "Approach", True); break
         
     # B. UTILITY & SPECIALISTS (NO WARMUP PREFERRED)
+    # Understable (Scramble)
     for idx, _ in candidates:
         if shelf.loc[idx]['Turn'] <= -2: pick_disc(idx, "Utility (US)", False); break
         
+    # Overstable (Wind)
     for idx, _ in candidates:
         if shelf.loc[idx]['Fade'] >= 3: pick_disc(idx, "Utility (OS)", False); break
         
@@ -547,7 +564,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v76.0 The Big Reset</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v76.1 The Mechanic</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -864,11 +881,16 @@ with current_tab[3]:
                     st.divider()
 
             if st.button("Verkställ (Flytta till Bag)", type="primary"):
-                indices = [r['idx'] for r in st.session_state.suggested_pack]
-                st.session_state.inventory.loc[indices, "Status"] = "Bag"
+                # Use simple filtering instead of index to avoid mismatch if shelf changed
+                updates = []
+                for r in st.session_state.suggested_pack:
+                     idx = r['idx']
+                     st.session_state.inventory.loc[idx, "Status"] = "Bag"
+                
                 save_to_sheet(st.session_state.inventory, "Inventory")
                 st.session_state.suggested_pack = []
                 st.success("Packat och klart!")
+                time.sleep(0.5)
                 st.rerun()
     
     st.divider()
