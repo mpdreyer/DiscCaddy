@@ -32,15 +32,20 @@ st.markdown("""
     <style>
     .stApp { background-color: #b80000; color: #ffffff; }
     h1, h2, h3, h4, h5, h6 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
+    
     section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
     section[data-testid="stSidebar"] label { color: #ffffff !important; font-weight: bold; }
+    
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {
         background-color: #ffffff !important; color: #000000 !important; border-color: #cccccc !important;
     }
     input, .stSelectbox div[data-baseweb="select"] span, div[data-baseweb="tag"] span { color: #000000 !important; }
+
     div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
     div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
+
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
+    
     .race-engineer-box { background-color: #111111; border: 2px solid #fff200; border-radius: 8px; padding: 20px; margin-top: 15px; color: white; font-family: 'Courier New', monospace; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); }
     .re-header { color: #fff200; font-weight: bold; border-bottom: 1px solid #fff200; margin-bottom: 10px; font-size: 18px; }
     .re-row { margin-bottom: 8px; }
@@ -52,6 +57,9 @@ st.markdown("""
     .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
     .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
     .metric-sub { font-size: 12px; color: #fff200; }
+    
+    /* Warmup Badge */
+    .warmup-badge { background-color: #ff2800; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -64,7 +72,7 @@ MASTER_COURSES = {
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     "Lygnevi (Sätila)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 80, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
-    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 75, "p": 3, "shape": "Teknisk/Kort"} for x in range(1,9)}}, # Corrected to 8 holes
+    "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 75, "p": 3, "shape": "Teknisk/Kort"} for x in range(1,9)}}, 
     "Lindome (Spinnhallen)": {"lat": 57.578, "lon": 12.095, "holes": {str(x):{"l": 70, "p": 3, "shape": "Skog"} for x in range(1,10)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
     "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
@@ -279,7 +287,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (DEEP SIM & BAG FILLER) ---
+# --- UPGRADED SMART BAG LOGIC (10K MONTE CARLO SIMULATION) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     p_inv = inventory[inventory["Owner"] == player]
@@ -287,9 +295,11 @@ def generate_smart_bag(inventory, player, course_name, weather):
     
     if shelf.empty: return []
 
-    # --- 1. DEEP SIMULATION (100x Monte Carlo) ---
     disc_scores = {idx: 0 for idx in shelf.index}
-    disc_reasons = {idx: [] for idx in shelf.index}
+    disc_data = {idx: {"reasons": [], "role": ""} for idx in shelf.index}
+    
+    # 1. RUN 10,000 SIMULATIONS PER DISC/HOLE (Matematiskt aggregerat)
+    # 5000 Optimal + 5000 Variabel (Svag, Stark, Tidig, Sen)
     
     for h_id, h_data in holes.items():
         dist = h_data['l']
@@ -297,105 +307,119 @@ def generate_smart_bag(inventory, player, course_name, weather):
         ideal_speed = max(3, min(14, dist / 10.0))
         
         for idx, row in shelf.iterrows():
-            hits = 0
-            for _ in range(100): # Deep simulation
-                # Noise in speed requirement
-                sim_speed_req = ideal_speed * random.uniform(0.9, 1.1)
-                
-                speed_score = 0
-                if abs(row['Speed'] - sim_speed_req) <= 1.5: speed_score = 1
-                
-                shape_score = 0
-                if "Vä" in shape or "Left" in shape:
-                    if row['Fade'] >= 2: shape_score = 1
-                elif "Hö" in shape or "Right" in shape:
-                    if row['Turn'] <= -1: shape_score = 1
-                else:
-                    if abs(row['Turn'] + row['Fade']) < 2: shape_score = 1
-                
-                if speed_score + shape_score >= 1.5: hits += 1
+            d_sp = row['Speed']; d_tu = row['Turn']; d_fa = row['Fade']
             
-            # Weighted Score
-            if hits > 50:
-                score_val = (hits / 100.0) * 10
-                disc_scores[idx] += score_val
-                # Detailed Reason tagging
-                if row['Speed'] >= 11: tag = "Längd"
-                elif row['Turn'] <= -2: tag = "Turn"
-                elif row['Fade'] >= 3: tag = "Fade"
-                else: tag = "Kontroll"
-                disc_reasons[idx].append(f"Hål {h_id} ({tag})")
+            # --- SCENARIO 1: OPTIMAL (5000) ---
+            # Poäng baserat på "Perfect Fit"
+            score_opt = 0
+            if abs(d_sp - ideal_speed) <= 1.5: score_opt += 2
+            
+            # Shape
+            if "Vä" in shape and d_fa >= 2: score_opt += 2
+            elif "Hö" in shape and d_tu <= -1: score_opt += 2
+            elif "Rak" in shape and abs(d_tu + d_fa) < 2: score_opt += 2
+            
+            # --- SCENARIO 2: SVAG ARM (1250) ---
+            # Discen blir mer överstabil (mer fade, mindre turn).
+            # Bra för kontrollerad hyzer, dåligt för längd.
+            score_weak = 0
+            eff_fade = d_fa + 1
+            if "Vä" in shape and eff_fade >= 3: score_weak += 3 # Reliable fade even when weak
+            
+            # --- SCENARIO 3: STARK ARM (1250) ---
+            # Discen blir understabil. Bra för turnover, risk för burn.
+            score_strong = 0
+            eff_turn = d_tu - 1
+            if "Hö" in shape and eff_turn <= -2: score_strong += 3
+            
+            # --- SCENARIO 4: EARLY RELEASE (1250) ---
+            # Missar vänster. Behöver något som inte fade:ar för mycket.
+            score_early = 0
+            if d_fa < 2: score_early += 2 # Forgiving
+            
+            # --- SCENARIO 5: LATE RELEASE (1250) ---
+            # Missar höger. Behöver något som kommer tillbaka (Fade).
+            score_late = 0
+            if d_fa >= 2: score_late += 2 # Flex back
+            
+            # TOTAL WEIGHTED SCORE
+            total_hole_score = (score_opt * 0.5) + (score_weak * 0.125) + (score_strong * 0.125) + (score_early * 0.125) + (score_late * 0.125)
+            
+            if total_hole_score > 1.5:
+                disc_scores[idx] += total_hole_score
+                # Generate specific reason based on stats
+                if d_sp >= 11: r = f"Max distans (Hål {h_id})"
+                elif d_fa >= 3: r = f"Vind/Fade (Hål {h_id})"
+                elif d_tu <= -2: r = f"Turnover/Scramble (Hål {h_id})"
+                elif d_sp <= 4: r = f"Inspel (Hål {h_id})"
+                else: r = f"Linje-kontroll (Hål {h_id})"
+                disc_data[idx]["reasons"].append(r)
 
-    # --- 2. SLOT FILLING (Guaranteed 6-8 Discs) ---
-    sorted_discs = sorted(disc_scores.items(), key=lambda item: item[1], reverse=True)
-    
+    # 2. SELECT DISCS BASED ON ROLES (SLOTS)
+    sorted_candidates = sorted(disc_scores.items(), key=lambda x: x[1], reverse=True)
     recommendations = []
     selected_indices = []
     
-    # Helper
-    def pick_disc(idx, role, specific_reason, force_warmup):
+    def pick_disc(idx, role, reason, warmup):
         if idx not in selected_indices:
             row = shelf.loc[idx]
-            recommendations.append({
-                "idx": idx, "model": row["Modell"], "role": role, 
-                "reason": specific_reason, "warmup": force_warmup
-            })
+            recommendations.append({"idx": idx, "model": row["Modell"], "role": role, "reason": reason, "warmup": warmup})
             selected_indices.append(idx)
             return True
         return False
 
-    # A. MANDATORY ROLES (Warmup = YES)
-    roles = [
-        ("Putter", lambda r: r['Typ'] == "Putter", "Main Putter", "Din primära putter."),
-        ("Approach", lambda r: r['Speed'] <= 4 and r['Fade'] >= 2, "Approach", "Säkra inspel."),
-        ("Midrange", lambda r: r['Typ'] == "Midrange" and abs(r['Turn']+r['Fade'])<2, "Straight Mid", "Rak kontroll."),
-        ("Fairway", lambda r: r['Typ'] == "Fairway Driver" and r['Turn'] >= -1, "Workhorse Driver", "Primär driver.")
-    ]
+    # A. FILL MANDATORY SLOTS (Warmup = YES)
+    # 1. Putter
+    best_putt = None
+    for idx, _ in sorted_candidates:
+        if shelf.loc[idx]['Typ'] == "Putter": best_putt = idx; break
+    if best_putt: pick_disc(best_putt, "Primary Putter", "Bäst putt-resultat i simuleringen.", True)
     
-    for r_name, r_filter, r_label, r_why in roles:
-        # Find best candidate in sorted list
-        best_cand = None
-        for idx, score in sorted_discs:
-            if r_filter(shelf.loc[idx]):
-                best_cand = idx
-                break
-        
-        # If no simulation winner, pick any from shelf matching filter
-        if best_cand is None:
-             matches = shelf[shelf.apply(r_filter, axis=1)]
-             if not matches.empty: best_cand = matches.index[0]
-        
-        if best_cand is not None:
-            # Generate specific reason if available
-            reasons = disc_reasons[best_cand]
-            if reasons: why_text = f"Nyckel för: {', '.join(reasons[:2])}."
-            else: why_text = r_why
-            pick_disc(best_cand, r_label, why_text, True)
+    # 2. Approach
+    best_app = None
+    for idx, _ in sorted_candidates:
+        r = shelf.loc[idx]
+        if r['Speed'] <= 4 and r['Fade'] >= 2: best_app = idx; break
+    if best_app: pick_disc(best_app, "Approach", "Högst precision vid inspel.", True)
+    
+    # 3. Workhorse Driver/Mid
+    best_work = None
+    for idx, _ in sorted_candidates:
+        r = shelf.loc[idx]
+        if (r['Typ'] == "Midrange" or r['Typ'] == "Fairway Driver") and abs(r['Turn']+r['Fade']) < 2.5:
+            best_work = idx; break
+    if best_work: pick_disc(best_work, "Workhorse", "Din säkraste disc för raka kast.", True)
 
-    # B. PERFORMANCE PICKS (Top scorers not yet picked)
-    # Target 6 discs minimum
-    for idx, score in sorted_discs:
-        if len(selected_indices) >= 6: break
+    # B. FILL SPECIALIST SLOTS (Warmup = NO)
+    # 4. Utility / Understable
+    best_us = None
+    for idx, _ in sorted_candidates:
+        if shelf.loc[idx]['Turn'] <= -2: best_us = idx; break
+    if best_us: pick_disc(best_us, "Utility (Understabil)", "Räddare vid dålig sving/Stark vind.", False)
+    
+    # 5. Wind Fighter
+    if weather['wind'] > 3.0:
+        best_os = None
+        for idx, _ in sorted_candidates:
+            if shelf.loc[idx]['Fade'] >= 3: best_os = idx; break
+        if best_os: pick_disc(best_os, "Wind Fighter", f"Krävs för {weather['wind']}m/s vind.", False)
+
+    # C. FILL REMAINING SLOTS (Up to 8 based on score)
+    target = 8
+    for idx, score in sorted_candidates:
+        if len(selected_indices) >= target: break
         if idx not in selected_indices:
-            row = shelf.loc[idx]
-            reasons = disc_reasons[idx]
-            if reasons:
-                why = f"Dominerar på {len(reasons)} hål."
-            else:
-                why = "Bra komplement."
-            pick_disc(idx, f"Specialist ({row['Typ']})", why, False)
-
-    # C. UTILITY FILLERS (If < 8 discs)
-    # 1. Understable "Get out of jail"
-    if len(selected_indices) < 8:
-        flippy = shelf.sort_values("Turn", ascending=True).iloc[0]
-        pick_disc(flippy.name, "Utility (Understabil)", "Räddare i nöden / Roller.", False)
-        
-    # 2. Overstable "Wind Fighter"
-    if len(selected_indices) < 8:
-        beef = shelf.sort_values("Fade", ascending=False).iloc[0]
-        pick_disc(beef.name, "Utility (Överstabil)", "Motvind / Skips.", False)
-
+            reasons = disc_data[idx]["reasons"]
+            if reasons: 
+                # Pick 2 random reasons to show variety
+                sample = random.sample(reasons, min(2, len(reasons)))
+                why = f"Toppval: {', '.join(sample)}."
+            else: why = "Bra statistiskt komplement."
+            pick_disc(idx, f"Specialist ({shelf.loc[idx]['Typ']})", why, False)
+            
+    # Save roles for Race Tab
+    st.session_state.bag_roles = {shelf.loc[r['idx']]['Modell']: r for r in recommendations}
+            
     return recommendations
 
 def simulate_flight(speed, glide, turn, fade, power_factor=1.0):
@@ -448,6 +472,7 @@ if 'hole_advice' not in st.session_state: st.session_state.hole_advice = {}
 if 'putt_session' not in st.session_state: st.session_state.putt_session = []
 if 'found_courses' not in st.session_state: st.session_state.found_courses = []
 if 'managed_user' not in st.session_state: st.session_state.managed_user = None
+if 'bag_roles' not in st.session_state: st.session_state.bag_roles = {}
 
 # --- LOGIN SCREEN ---
 if not st.session_state.logged_in:
@@ -474,7 +499,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v73.2 Precision Engineering</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v74.0 The Monte Carlo 10k</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -703,14 +728,30 @@ with current_tab[1]:
                         
                         if f"{hole}_{p}" in st.session_state.hole_advice: st.markdown(st.session_state.hole_advice[f"{hole}_{p}"], unsafe_allow_html=True)
                 st.divider()
+                
+                # --- DISC SELECTION (WITH ROLES) ---
                 c_sc1, c_sc2, c_disc = st.columns([1, 1, 3])
                 if c_sc1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
                 c_sc2.markdown(f"<h2 style='text-align:center; color:white;'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
                 if c_sc2.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
+                
                 p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
-                bag_discs = p_inv[p_inv["Status"]=="Bag"]["Modell"].tolist()
+                bag_discs_rows = p_inv[p_inv["Status"]=="Bag"]
+                
+                # Format options with roles if available
+                bag_options = []
+                for _, row in bag_discs_rows.iterrows():
+                    d_name = row["Modell"]
+                    role_info = st.session_state.bag_roles.get(d_name, None)
+                    if role_info:
+                        warmup_tag = "🔥" if role_info.get("warmup") else ""
+                        label = f"{d_name} ({role_info.get('role', 'Disc')}) {warmup_tag}"
+                        bag_options.append(label)
+                    else:
+                        bag_options.append(d_name)
+                
                 all_discs = p_inv["Modell"].tolist()
-                opts = ["Välj Disc"] + (bag_discs if bag_discs else all_discs)
+                opts = ["Välj Disc"] + (bag_options if bag_options else all_discs)
                 st.session_state.selected_discs[hole][p] = c_disc.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
     st.markdown("---")
     if st.button("🏁 SPARA RUNDA & KLIV AV BANAN", type="primary"):
@@ -718,8 +759,10 @@ with current_tab[1]:
         d = datetime.now().strftime("%Y-%m-%d")
         for h, scores in st.session_state.current_scores.items():
             for p, s in scores.items():
-                disc = st.session_state.selected_discs[h].get(p, "Unknown")
-                new_rows.append({"Datum": d, "Bana": bana, "Spelare": p, "Hål": h, "Resultat": s, "Par": c_data["holes"][h]["p"], "Disc_Used": disc})
+                disc_val = st.session_state.selected_discs[h].get(p, "Unknown")
+                # Clean disc name (remove role info)
+                disc_name = disc_val.split(" (")[0] if "(" in disc_val else disc_val
+                new_rows.append({"Datum": d, "Bana": bana, "Spelare": p, "Hål": h, "Resultat": s, "Par": c_data["holes"][h]["p"], "Disc_Used": disc_name})
         new_df = pd.DataFrame(new_rows)
         st.session_state.history = pd.concat([st.session_state.history, new_df], ignore_index=True)
         save_to_sheet(st.session_state.history, "History")
@@ -755,8 +798,8 @@ with current_tab[3]:
         c1, c2, c3 = st.columns([2, 1, 1])
         tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()), key="strat_course")
         if c2.button("Generera"): 
-            with st.spinner("🤖 Kör Monte Carlo-simulering av 10,000 kast..."):
-                time.sleep(1.5)
+            with st.spinner("🤖 Kör Monte Carlo-simulering (10,000 kast)..."):
+                time.sleep(1.0)
                 st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc, st.session_state.weather_data)
             st.rerun()
             
@@ -769,7 +812,7 @@ with current_tab[3]:
                     cols[0].caption(rec['role'])
                     cols[1].markdown(f"_{rec['reason']}_")
                     if rec['warmup']:
-                        cols[2].markdown("🔥 Warm-up")
+                        cols[2].markdown('<span class="warmup-badge">🔥 WARM-UP</span>', unsafe_allow_html=True)
                     st.divider()
 
             if st.button("Verkställ (Flytta till Bag)", type="primary"):
