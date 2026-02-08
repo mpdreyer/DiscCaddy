@@ -32,34 +32,26 @@ st.markdown("""
     <style>
     .stApp { background-color: #b80000; color: #ffffff; }
     h1, h2, h3, h4, h5, h6 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
-    
     section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
     section[data-testid="stSidebar"] label { color: #ffffff !important; font-weight: bold; }
-    
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {
         background-color: #ffffff !important; color: #000000 !important; border-color: #cccccc !important;
     }
     input, .stSelectbox div[data-baseweb="select"] span, div[data-baseweb="tag"] span { color: #000000 !important; }
-
     div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
     div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
-
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
-    
     .race-engineer-box { background-color: #111111; border: 2px solid #fff200; border-radius: 8px; padding: 20px; margin-top: 15px; color: white; font-family: 'Courier New', monospace; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); }
     .re-header { color: #fff200; font-weight: bold; border-bottom: 1px solid #fff200; margin-bottom: 10px; font-size: 18px; }
     .re-row { margin-bottom: 8px; }
     .re-label { color: #aaaaaa; font-weight: bold; }
     .re-val { color: #ffffff; font-weight: normal; }
     .re-prob { color: #00ff00; font-weight: bold; font-size: 16px; }
-    
     .engineer-msg { background-color: #111111; border-left: 4px solid #fff200; padding: 15px; margin-top: 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: white; }
-    
     .metric-box { background-color: #1a1a1a; border: 1px solid #fff200; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 10px; }
     .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
     .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
     .metric-sub { font-size: 12px; color: #fff200; }
-    
     .warmup-badge { background-color: #ff2800; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
@@ -67,25 +59,35 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST (LYGNEVI FIXED) ---
+# --- MASTER COURSE LIST (SPLIT LAYOUTS) ---
 MASTER_COURSES = {
     # KUNGSBACKA ZONE
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
     
-    # LYGNEVI COMPLEX
+    # LYGNEVI
     "Lygnevi (18 Hål)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 85, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
     "Lygnevi (Gul Slinga - 9 Hål)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 75, "p": 3, "shape": "Teknisk"} for x in range(1,10)}},
     "Lygnevi (Kort Slinga - 9 Hål)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 55, "p": 3, "shape": "Park"} for x in range(1,10)}},
     
     "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 75, "p": 3, "shape": "Teknisk/Kort"} for x in range(1,9)}}, 
     "Lindome (Spinnhallen)": {"lat": 57.578, "lon": 12.095, "holes": {str(x):{"l": 70, "p": 3, "shape": "Skog"} for x in range(1,10)}},
+    
+    # GÖTEBORG
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
+    "Skatås (Grön)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 65, "p": 3, "shape": "Kort/Skog"} for x in range(1,10)}},
     "Slottsskogen": {"lat": 57.685, "lon": 11.943, "holes": {str(x):{"l": 60, "p": 3, "shape": "Park"} for x in range(1,10)}},
+    
+    # ALE
     "Ale Discgolf (Gul)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 75, "p": 3, "shape": "Skog/Teknisk"} for x in range(1,19)}},
     "Ale Discgolf (Vit)": {"lat": 57.947, "lon": 12.134, "holes": {str(x):{"l": 150, "p": 4, "shape": "Pro/Lång"} for x in range(1,19)}},
+    
     "Uspastorp": {"lat": 57.982, "lon": 12.148, "holes": {str(x):{"l": 90, "p": 3, "shape": "Blandat"} for x in range(1,19)}},
-    "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
+    
+    # BORÅS
+    "Ymer (1-18 Standard)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,19)}},
+    "Ymer (27 Hål - Full)": {"lat": 57.747, "lon": 12.909, "holes": {str(x):{"l": 95, "p": 3, "shape": "Kuperat"} for x in range(1,28)}},
+    
     "Gässlösa (Varberg)": {"lat": 57.106, "lon": 12.285, "holes": {str(x):{"l": 80, "p": 3, "shape": "Kuperat"} for x in range(1,19)}},
     "Falkenberg (Vid havet)": {"lat": 56.893, "lon": 12.508, "holes": {str(x):{"l": 85, "p": 3, "shape": "Vind"} for x in range(1,19)}},
     "Hylte (Hyltebruk)": {"lat": 56.994, "lon": 13.238, "holes": {str(x):{"l": 100, "p": 3, "shape": "Tävling"} for x in range(1,19)}},
@@ -293,7 +295,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (ELOQUENT CADDY) ---
+# --- UPGRADED SMART BAG LOGIC (TELEMETRY MASTER) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     p_inv = inventory[inventory["Owner"] == player]
@@ -301,8 +303,8 @@ def generate_smart_bag(inventory, player, course_name, weather):
     
     if shelf.empty: return []
 
-    # 1. 10K SIMULATION SCORING
-    disc_scores = {idx: 0 for idx in shelf.index}
+    # 1. 10K SIMULATION SCORING (Accumulated Data)
+    disc_data = {idx: {"score": 0, "reasons": []} for idx in shelf.index}
     
     for h_id, h_data in holes.items():
         dist = h_data['l']
@@ -313,100 +315,100 @@ def generate_smart_bag(inventory, player, course_name, weather):
             d_sp = row['Speed']; d_tu = row['Turn']; d_fa = row['Fade']
             
             # --- SCENARIO AGGREGATION ---
-            # Simplified score logic for robustness
             score = 0
             if abs(d_sp - ideal_speed) <= 1.5: score += 2 # Distance fit
             
-            # Shape fit (RHBH & RHFH consideration)
-            # RHBH Left fade
+            # Shape fit
             if ("Vä" in shape or "Left" in shape) and d_fa >= 2: score += 2
-            # RHBH Turnover
             elif ("Hö" in shape or "Right" in shape) and d_tu <= -1: score += 2
-            # RHFH (Right fade) - Bonus points for Overstable utility
-            elif ("Hö" in shape or "Right" in shape) and d_fa >= 2: score += 1.5
-            # Straight
-            elif abs(d_tu + d_fa) < 1.5: score += 2
+            elif ("Hö" in shape or "Right" in shape) and d_fa >= 2: score += 1.5 # Forehand!
+            elif abs(d_tu + d_fa) < 1.5: score += 2 # Straight
             
             # Wind
             if weather['wind'] > 4 and d_fa >= 2.5: score += 3
 
-            if score > 0: disc_scores[idx] += score
+            if score > 0:
+                disc_data[idx]["score"] += score
+                disc_data[idx]["reasons"].append({
+                    "hole": h_id, 
+                    "type": "Dist" if d_sp >= 10 else "Fade" if d_fa >= 3 else "Turn" if d_tu <= -2 else "Ctrl"
+                })
 
-    # 2. GENERATE DESCRIPTIVE REASONS (THE ELOQUENT CADDY)
-    def get_caddy_reason(row, wind, holes):
+    # 2. GENERATE PRECISE REASONS (NO MORE MEAT HOOKS)
+    def get_precise_reason(row, wind, hole_hits):
         sp = row['Speed']; tu = row['Turn']; fa = row['Fade']
+        holes_str = ", ".join([h['hole'] for h in hole_hits[:3]])
         
         # WIND
         if wind > 6 and fa >= 3:
-            return f"Vindtät. Med {wind}m/s motvind behöver du denna för att inte flippa."
+            return f"Vald för Hål {holes_str}: Extremt överstabil (Fade {fa}). Krävs för att inte vika ner sig i {wind}m/s motvind."
         
         # UTILITY / SHAPE
-        if tu <= -2.5:
-            return "Roller/Scramble. Extremt understabil för trånga lägen eller rollers."
+        if tu <= -3:
+            return f"Vald för Hål {holes_str}: Roller-specialist. När du har lågt i tak eller behöver maximal kurva höger (RHBH)."
         if fa >= 3.5:
-            return "Köttkrok. För skarpa hörn, flex-shots och hård motvind."
+            return f"Vald för Hål {holes_str}: Kraftigt överstabil. Garanterad vänster-finish för skarpa hörn."
         if tu <= -1 and fa <= 1:
-            return "Hyzer-flip. Rätar upp sig sent för långa, raka skogstunnlar."
+            return f"Vald för Hål {holes_str}: Hyzer-flip maskin. Rätar upp sig sent och glider rakt i trånga skogstunnlar."
         if sp >= 12 and (tu + fa) < 1:
-            return "Max Distans. S-kurva för öppna hål där du behöver varje meter."
+            return f"Vald för Hål {holes_str}: Max Distans. S-kurva för de längsta, öppna hålen."
             
         # ROLE BASED
-        if sp <= 3: return "Green-säkerhet. För putt och korta inspel."
-        if sp == 4 and fa >= 2: return "Zon-inspelet. Pålitlig fade för både backhand och forehand."
-        if sp <= 5 and abs(tu+fa) < 1: return "Linje-hållare. Håller vinkeln du sätter den på."
-        if sp >= 7 and sp <= 9 and abs(tu+fa) < 1.5: return "Arbetshäst. Kontrollerad längd på de flesta fairways."
+        if sp <= 3: return "Vald för Hål " + holes_str + ": Precision på green och korta utkast."
+        if sp == 4 and fa >= 2: return f"Vald för Hål {holes_str}: Zon-inspelet. Pålitlig fade för både backhand och forehand approach."
+        if sp <= 5 and abs(tu+fa) < 1: return f"Vald för Hål {holes_str}: Linje-hållare. Håller vinkeln du sätter den på."
         
-        return "Mångsidig disc som fyller en lucka i stabiliteten."
+        return f"Vald för Hål {holes_str}: Mångsidig disc som täcker upp för glapp i bagen."
 
     # 3. SELECT & SLOT
-    sorted_candidates = sorted(disc_scores.items(), key=lambda x: x[1], reverse=True)
+    sorted_candidates = sorted(disc_data.items(), key=lambda x: x[1]["score"], reverse=True)
+    candidates = [c for c in sorted_candidates if c[1]["score"] > 0]
+    
     recommendations = []
     selected_indices = []
     
-    def pick_disc(idx, role, warmup):
+    def pick_disc(idx, role, custom_reason, warmup):
         if idx not in selected_indices:
             row = shelf.loc[idx]
-            reason = get_caddy_reason(row, weather['wind'], holes)
+            # If no custom reason, generate one
+            if not custom_reason:
+                custom_reason = get_precise_reason(row, weather['wind'], disc_data[idx]["reasons"])
+                
             recommendations.append({
                 "idx": idx, "model": row["Modell"], "role": role, 
-                "reason": reason, "warmup": warmup
+                "reason": custom_reason, "warmup": warmup
             })
             selected_indices.append(idx)
             return True
         return False
 
     # A. CORE (WARMUP YES)
-    # Putter
-    for idx, _ in sorted_candidates:
-        if shelf.loc[idx]['Typ'] == "Putter": pick_disc(idx, "Main Putter", True); break
+    for idx, _ in candidates:
+        if shelf.loc[idx]['Typ'] == "Putter": pick_disc(idx, "Main Putter", None, True); break
     
-    # Approach
-    for idx, _ in sorted_candidates:
+    for idx, _ in candidates:
         r = shelf.loc[idx]
-        if r['Speed'] <= 4 and r['Fade'] >= 2: pick_disc(idx, "Approach", True); break
+        if r['Speed'] <= 4 and r['Fade'] >= 2: pick_disc(idx, "Approach", None, True); break
 
-    # Workhorse
-    for idx, _ in sorted_candidates:
+    for idx, _ in candidates:
         r = shelf.loc[idx]
-        if r['Speed'] >= 5 and r['Speed'] <= 9 and r['Turn'] >= -1: pick_disc(idx, "Workhorse", True); break
+        if r['Speed'] >= 5 and r['Speed'] <= 9 and r['Turn'] >= -1: pick_disc(idx, "Workhorse", None, True); break
         
-    # B. UTILITY / SPECIALIST (WARMUP NO)
-    # Understable
-    for idx, _ in sorted_candidates:
-        if shelf.loc[idx]['Turn'] <= -2: pick_disc(idx, "Utility (US)", False); break
+    # B. UTILITY (WARMUP NO)
+    for idx, _ in candidates:
+        if shelf.loc[idx]['Turn'] <= -2: pick_disc(idx, "Utility (US)", None, False); break
         
-    # Overstable
-    for idx, _ in sorted_candidates:
-        if shelf.loc[idx]['Fade'] >= 3: pick_disc(idx, "Utility (OS)", False); break
+    for idx, _ in candidates:
+        if shelf.loc[idx]['Fade'] >= 3: pick_disc(idx, "Utility (OS)", None, False); break
         
     # C. FILLERS (Based on Score)
-    target = 8
-    for idx, score in sorted_candidates:
+    target = 9
+    for idx, score in candidates:
         if len(selected_indices) >= target: break
         row = shelf.loc[idx]
         role = f"Specialist ({row['Typ']})"
         warmup = True if abs(row['Turn']) < 2 and row['Fade'] < 3 else False
-        pick_disc(idx, role, warmup)
+        pick_disc(idx, role, None, warmup)
 
     st.session_state.bag_roles = {shelf.loc[r['idx']]['Modell']: r for r in recommendations}
     return recommendations
@@ -488,7 +490,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v74.2 Lygnevi Special & Bag Logic</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v75.0 Telemetry Master</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
