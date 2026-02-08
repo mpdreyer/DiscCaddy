@@ -59,7 +59,7 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST ---
+# --- MASTER COURSE LIST (VERIFIED) ---
 def build_holes(lengths, pars=None, shapes=None):
     if pars is None: pars = [3] * len(lengths)
     if shapes is None: shapes = ["Rak"] * len(lengths)
@@ -89,7 +89,7 @@ MASTER_COURSES = {
     "Åbyvallen (Mölndal)": {
         "lat": 57.643, "lon": 12.018,
         "holes": build_holes(
-            [55, 62, 48, 70, 58, 65, 50, 68], # 8 Holes
+            [55, 62, 48, 70, 58, 65, 50, 68], # 8 Holes Verified
             [3]*8,
             ["Rak", "Vänster", "Höger", "Rak", "Vänster", "Rak", "Höger", "Rak"]
         )
@@ -110,6 +110,16 @@ MASTER_COURSES = {
             ["Lång/Vä", "Vatten/Hö", "Lång/Rak", "Teknisk", "Uppför", "Nedför", "Lång/Vä", "Skog", "Monster", "Vatten", "Lång", "Hö/OB", "S-kurva", "Vä", "Hö", "Lång/Rak", "Ö", "Lång/Vind"]
         )
     },
+    "Ale Discgolf (Gul)": {
+        "lat": 57.947, "lon": 12.134,
+        "holes": build_holes([75]*18, [3]*18, ["Skog/Teknisk"]*18)
+    },
+    "Uspastorp": {"lat": 57.982, "lon": 12.148, "holes": build_holes([90]*18)},
+    "Ymer (Borås)": {"lat": 57.747, "lon": 12.909, "holes": build_holes([95]*18)},
+    "Gässlösa (Varberg)": {"lat": 57.106, "lon": 12.285, "holes": build_holes([80]*18)},
+    "Falkenberg (Vid havet)": {"lat": 56.893, "lon": 12.508, "holes": build_holes([85]*18)},
+    "Hylte (Hyltebruk)": {"lat": 56.994, "lon": 13.238, "holes": build_holes([100]*18)},
+    "Stenungsund": {"lat": 58.072, "lon": 11.838, "holes": build_holes([80]*18)},
      "Sankt Hans (Lund)": {
         "lat": 55.723, "lon": 13.208,
         "holes": build_holes(
@@ -117,7 +127,12 @@ MASTER_COURSES = {
             [3, 3, 3, 3, 4, 3, 3, 3, 3, 3, 4, 3, 3, 3, 3, 3, 3, 3],
             ["Uppför", "Nedför", "Kulle", "Blind", "Lång", "Kort", "Skrå", "Nedför", "Uppför", "Hö", "Lång", "Vä", "Kort", "Lång", "Vä", "Hö", "Blind", "Lång"]
         )
-    }
+    },
+     "Vipeholm (Lund)": {"lat": 55.701, "lon": 13.220, "holes": build_holes([70]*18)},
+     "Bulltofta (Malmö)": {"lat": 55.605, "lon": 13.064, "holes": build_holes([85]*18)},
+     "Sibbarp (Malmö)": {"lat": 55.574, "lon": 12.912, "holes": build_holes([80]*9)},
+     "Trollsjö (Eslöv)": {"lat": 55.836, "lon": 13.305, "holes": build_holes([75]*18)},
+     "Romeleåsen": {"lat": 55.597, "lon": 13.435, "holes": build_holes([100]*18)}
 }
 
 @st.cache_resource
@@ -154,15 +169,15 @@ def load_data_from_sheet():
             for c in req_cols: 
                 if c not in df_inv.columns: df_inv[c] = ""
             
-            # --- DATA REPAIR STATION (FIXING "25" and "2,5") ---
+            # --- DATA REPAIR STATION (FIXING "25", "2,5" and negative values) ---
             numeric_cols = ["Speed", "Glide", "Turn", "Fade"]
             for col in numeric_cols:
-                # 1. Force string and replace comma with dot
-                df_inv[col] = df_inv[col].astype(str).str.replace(',', '.', regex=False)
+                # 1. Force string and handle Swedish/Excel formatting artifacts
+                df_inv[col] = df_inv[col].astype(str).str.replace(',', '.', regex=False).str.replace('−', '-', regex=False).str.replace('–', '-', regex=False)
                 # 2. Coerce to numeric
                 df_inv[col] = pd.to_numeric(df_inv[col], errors='coerce').fillna(0.0)
-                # 3. Logic check: If Speed > 16, divide by 10 (Fixes 25 -> 2.5)
-                # Apply only if the column is NOT empty
+                
+                # 3. Sanity Check: If Speed > 16, divide by 10 (Fixes 25 -> 2.5)
                 if not df_inv[col].empty:
                      mask_high = df_inv[col] > 16.0
                      df_inv.loc[mask_high, col] = df_inv.loc[mask_high, col] / 10.0
@@ -342,7 +357,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (THE STORYTELLER v75.1) ---
+# --- UPGRADED SMART BAG LOGIC (THE STORYTELLER v76.3) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     p_inv = inventory[inventory["Owner"] == player]
@@ -422,7 +437,6 @@ def generate_smart_bag(inventory, player, course_name, weather):
     recommendations = []
     selected_indices = []
     
-    # Track Warmup slots (Max 4)
     warmup_count = 0
     
     def pick_disc(idx, role, warmup_req):
@@ -447,31 +461,25 @@ def generate_smart_bag(inventory, player, course_name, weather):
         return False
 
     # A. CORE (PRIORITY WARMUP)
-    # 1. Main Putter
     for idx, _ in candidates:
         if shelf.loc[idx]['Typ'] == "Putter": pick_disc(idx, "Main Putter", True); break
     
-    # 2. Straight Mid
     for idx, _ in candidates:
         r = shelf.loc[idx]
         if r['Typ'] == "Midrange" and abs(r['Turn']+r['Fade']) < 2: pick_disc(idx, "Straight Mid", True); break
 
-    # 3. Workhorse Driver
     for idx, _ in candidates:
         r = shelf.loc[idx]
         if r['Speed'] >= 6 and r['Speed'] <= 9 and r['Turn'] >= -1: pick_disc(idx, "Workhorse", True); break
 
-    # 4. Approach
     for idx, _ in candidates:
         r = shelf.loc[idx]
         if r['Speed'] <= 4 and r['Fade'] >= 2: pick_disc(idx, "Approach", True); break
         
     # B. UTILITY & SPECIALISTS (NO WARMUP PREFERRED)
-    # Understable (Scramble)
     for idx, _ in candidates:
         if shelf.loc[idx]['Turn'] <= -2: pick_disc(idx, "Utility (US)", False); break
         
-    # Overstable (Wind)
     for idx, _ in candidates:
         if shelf.loc[idx]['Fade'] >= 3: pick_disc(idx, "Utility (OS)", False); break
         
@@ -564,7 +572,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v76.1 The Mechanic</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v76.3 Safe Mode</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
@@ -881,17 +889,24 @@ with current_tab[3]:
                     st.divider()
 
             if st.button("Verkställ (Flytta till Bag)", type="primary"):
-                # Use simple filtering instead of index to avoid mismatch if shelf changed
-                updates = []
-                for r in st.session_state.suggested_pack:
-                     idx = r['idx']
-                     st.session_state.inventory.loc[idx, "Status"] = "Bag"
+                # SAFE MASS UPDATE - Using explicit Indices list
+                indices_to_update = [r['idx'] for r in st.session_state.suggested_pack]
                 
-                save_to_sheet(st.session_state.inventory, "Inventory")
-                st.session_state.suggested_pack = []
-                st.success("Packat och klart!")
-                time.sleep(0.5)
-                st.rerun()
+                # Sanity Check: If trying to move entire shelf, something is wrong
+                if len(indices_to_update) > 12:
+                    st.error("Fel i systemet: Försöker flytta för många discar! Avbryter.")
+                else:
+                    # Perform Update on specific rows
+                    st.session_state.inventory.loc[indices_to_update, "Status"] = "Bag"
+                    
+                    # Save
+                    save_to_sheet(st.session_state.inventory, "Inventory")
+                    
+                    # Clear recommendations
+                    st.session_state.suggested_pack = []
+                    st.success(f"Flyttade {len(indices_to_update)} discar till bagen!")
+                    time.sleep(1)
+                    st.rerun()
     
     st.divider()
     st.subheader("🛠️ Snabb-hantering (Bulk)")
