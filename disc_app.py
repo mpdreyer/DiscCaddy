@@ -32,26 +32,34 @@ st.markdown("""
     <style>
     .stApp { background-color: #b80000; color: #ffffff; }
     h1, h2, h3, h4, h5, h6 { color: #fff200 !important; font-family: 'Arial Black', sans-serif; text-transform: uppercase; text-shadow: 2px 2px 0px #000000; }
+    
     section[data-testid="stSidebar"] { background-color: #111111; border-right: 3px solid #fff200; }
     section[data-testid="stSidebar"] label { color: #ffffff !important; font-weight: bold; }
+    
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {
         background-color: #ffffff !important; color: #000000 !important; border-color: #cccccc !important;
     }
     input, .stSelectbox div[data-baseweb="select"] span, div[data-baseweb="tag"] span { color: #000000 !important; }
+
     div.stButton > button { background-color: #000000; color: #fff200; border: 2px solid #fff200; border-radius: 8px; font-weight: bold; text-transform: uppercase; padding: 0.5rem 1rem; width: 100%; }
     div.stButton > button:hover { background-color: #fff200; color: #000000; border-color: #000000; }
+
     .streamlit-expanderContent { background-color: #1a1a1a; color: white; border: 1px solid #fff200; border-radius: 0 0 5px 5px; }
+    
     .race-engineer-box { background-color: #111111; border: 2px solid #fff200; border-radius: 8px; padding: 20px; margin-top: 15px; color: white; font-family: 'Courier New', monospace; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); }
     .re-header { color: #fff200; font-weight: bold; border-bottom: 1px solid #fff200; margin-bottom: 10px; font-size: 18px; }
     .re-row { margin-bottom: 8px; }
     .re-label { color: #aaaaaa; font-weight: bold; }
     .re-val { color: #ffffff; font-weight: normal; }
     .re-prob { color: #00ff00; font-weight: bold; font-size: 16px; }
+    
     .engineer-msg { background-color: #111111; border-left: 4px solid #fff200; padding: 15px; margin-top: 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: white; }
+    
     .metric-box { background-color: #1a1a1a; border: 1px solid #fff200; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 10px; }
     .metric-label { font-size: 12px; color: #aaaaaa; text-transform: uppercase; }
     .metric-value { font-size: 24px; font-weight: bold; color: #ffffff; }
     .metric-sub { font-size: 12px; color: #fff200; }
+    
     .warmup-badge { background-color: #ff2800; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
@@ -59,12 +67,17 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST ---
+# --- MASTER COURSE LIST (LYGNEVI FIXED) ---
 MASTER_COURSES = {
     # KUNGSBACKA ZONE
     "Kungsbackaskogen": {"lat": 57.492, "lon": 12.075, "holes": {str(x):{"l": l, "p": 3, "shape": s} for x,l,s in zip(range(1,10), [63,81,48,65,75,55,62,78,52], ["Rak","Vä","Rak","Hö","Rak","Vä","Rak","Rak","Rak"])}},
     "Onsala Discgolf": {"lat": 57.416, "lon": 12.029, "holes": {str(x):{"l": 65, "p": 3, "shape": "Rak"} for x in range(1,19)}},
-    "Lygnevi (Sätila)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 80, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
+    
+    # LYGNEVI COMPLEX
+    "Lygnevi (18 Hål)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 85, "p": 3, "shape": "Park/Vatten"} for x in range(1,19)}},
+    "Lygnevi (Gul Slinga - 9 Hål)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 75, "p": 3, "shape": "Teknisk"} for x in range(1,10)}},
+    "Lygnevi (Kort Slinga - 9 Hål)": {"lat": 57.545, "lon": 12.433, "holes": {str(x):{"l": 55, "p": 3, "shape": "Park"} for x in range(1,10)}},
+    
     "Åbyvallen (Mölndal)": {"lat": 57.643, "lon": 12.018, "holes": {str(x):{"l": 75, "p": 3, "shape": "Teknisk/Kort"} for x in range(1,9)}}, 
     "Lindome (Spinnhallen)": {"lat": 57.578, "lon": 12.095, "holes": {str(x):{"l": 70, "p": 3, "shape": "Skog"} for x in range(1,10)}},
     "Skatås (Gul)": {"lat": 57.704, "lon": 12.036, "holes": {str(x):{"l": 85, "p": 3, "shape": "Skog"} for x in range(1,19)}},
@@ -280,7 +293,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (FOREHAND & FLIGHT PHYSICS) ---
+# --- UPGRADED SMART BAG LOGIC (ELOQUENT CADDY) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     p_inv = inventory[inventory["Owner"] == player]
@@ -288,9 +301,8 @@ def generate_smart_bag(inventory, player, course_name, weather):
     
     if shelf.empty: return []
 
-    # --- SIMULATION SCORING (WEIGHTED AGGREGATION) ---
+    # 1. 10K SIMULATION SCORING
     disc_scores = {idx: 0 for idx in shelf.index}
-    disc_explanations = {idx: "" for idx in shelf.index} # Holds the "Why"
     
     for h_id, h_data in holes.items():
         dist = h_data['l']
@@ -299,72 +311,62 @@ def generate_smart_bag(inventory, player, course_name, weather):
         
         for idx, row in shelf.iterrows():
             d_sp = row['Speed']; d_tu = row['Turn']; d_fa = row['Fade']
-            hole_score = 0
             
-            # --- 1. BACKHAND SIM (5000 units) ---
-            # Optimal (2000)
-            if abs(d_sp - ideal_speed) <= 1.5: hole_score += 1
-            if "Vä" in shape and d_fa >= 2: hole_score += 2 # Fade match
-            elif "Hö" in shape and d_tu <= -1: hole_score += 2 # Turn match
-            elif "Rak" in shape and abs(d_tu+d_fa) < 2: hole_score += 2 # Straight
+            # --- SCENARIO AGGREGATION ---
+            # Simplified score logic for robustness
+            score = 0
+            if abs(d_sp - ideal_speed) <= 1.5: score += 2 # Distance fit
             
-            # Weak Arm (1500) -> Disc acts overstable
-            eff_fade_weak = d_fa + 1
-            if "Vä" in shape and eff_fade_weak >= 3: hole_score += 1 # Good for guaranteed fade
+            # Shape fit (RHBH & RHFH consideration)
+            # RHBH Left fade
+            if ("Vä" in shape or "Left" in shape) and d_fa >= 2: score += 2
+            # RHBH Turnover
+            elif ("Hö" in shape or "Right" in shape) and d_tu <= -1: score += 2
+            # RHFH (Right fade) - Bonus points for Overstable utility
+            elif ("Hö" in shape or "Right" in shape) and d_fa >= 2: score += 1.5
+            # Straight
+            elif abs(d_tu + d_fa) < 1.5: score += 2
             
-            # Early Release (1500) -> Miss left (BH)
-            # Low fade helps correct course? No, low fade keeps it straight left.
-            # High fade brings it back? Yes.
-            if d_fa >= 2: hole_score += 0.5
+            # Wind
+            if weather['wind'] > 4 and d_fa >= 2.5: score += 3
 
-            # --- 2. FOREHAND SIM (5000 units) ---
-            # RHFH fades RIGHT.
-            # Optimal (2000)
-            fh_score = 0
-            if abs(d_sp - ideal_speed) <= 1.5: fh_score += 1
-            
-            # Shape Logic FLIPPED for Forehand
-            # "Höger" (Right) hole needs Fade (RHFH)
-            if ("Hö" in shape or "Right" in shape) and d_fa >= 2: fh_score += 3 # Strong match!
-            # "Vänster" (Left) hole needs Turn (RHFH) - risky
-            elif ("Vä" in shape or "Left" in shape) and d_tu <= -1: fh_score += 1 # Risky turnover
-            
-            # Forehand preference for flat/overstable discs
-            if d_fa >= 2 and d_tu > -1: fh_score += 1 # Reliable torque resistance
-            
-            hole_score += fh_score
+            if score > 0: disc_scores[idx] += score
 
-            # --- 3. WIND ---
-            if weather['wind'] > 4.0 and d_fa >= 3: hole_score += 3
+    # 2. GENERATE DESCRIPTIVE REASONS (THE ELOQUENT CADDY)
+    def get_caddy_reason(row, wind, holes):
+        sp = row['Speed']; tu = row['Turn']; fa = row['Fade']
+        
+        # WIND
+        if wind > 6 and fa >= 3:
+            return f"Vindtät. Med {wind}m/s motvind behöver du denna för att inte flippa."
+        
+        # UTILITY / SHAPE
+        if tu <= -2.5:
+            return "Roller/Scramble. Extremt understabil för trånga lägen eller rollers."
+        if fa >= 3.5:
+            return "Köttkrok. För skarpa hörn, flex-shots och hård motvind."
+        if tu <= -1 and fa <= 1:
+            return "Hyzer-flip. Rätar upp sig sent för långa, raka skogstunnlar."
+        if sp >= 12 and (tu + fa) < 1:
+            return "Max Distans. S-kurva för öppna hål där du behöver varje meter."
+            
+        # ROLE BASED
+        if sp <= 3: return "Green-säkerhet. För putt och korta inspel."
+        if sp == 4 and fa >= 2: return "Zon-inspelet. Pålitlig fade för både backhand och forehand."
+        if sp <= 5 and abs(tu+fa) < 1: return "Linje-hållare. Håller vinkeln du sätter den på."
+        if sp >= 7 and sp <= 9 and abs(tu+fa) < 1.5: return "Arbetshäst. Kontrollerad längd på de flesta fairways."
+        
+        return "Mångsidig disc som fyller en lucka i stabiliteten."
 
-            # --- RESULT ---
-            if hole_score > 3:
-                disc_scores[idx] += hole_score
-                # Generate dynamic reason string
-                # We check what contributed most
-                if fh_score > 2:
-                    disc_explanations[idx] = f"Stabilt Forehand-val för Hål {h_id} (högersväng)."
-                elif d_sp >= 11:
-                    disc_explanations[idx] = f"Max distans-potential på Hål {h_id}."
-                elif d_tu <= -2:
-                    disc_explanations[idx] = f"Hyzer-flip / Turnover för Hål {h_id}."
-                elif d_fa >= 3:
-                    disc_explanations[idx] = f"Pålitlig fade (Vind/Hundben) på Hål {h_id}."
-                else:
-                    disc_explanations[idx] = f"Rak linjekontroll för Hål {h_id}."
-
-    # --- SELECTION & SLOTTING ---
+    # 3. SELECT & SLOT
     sorted_candidates = sorted(disc_scores.items(), key=lambda x: x[1], reverse=True)
     recommendations = []
     selected_indices = []
     
-    def pick_disc(idx, role, custom_reason=None, warmup=False):
+    def pick_disc(idx, role, warmup):
         if idx not in selected_indices:
             row = shelf.loc[idx]
-            # Use custom reason if provided, else generated physics reason
-            reason = custom_reason if custom_reason else disc_explanations[idx]
-            if not reason: reason = "Statistiskt bra val."
-            
+            reason = get_caddy_reason(row, weather['wind'], holes)
             recommendations.append({
                 "idx": idx, "model": row["Modell"], "role": role, 
                 "reason": reason, "warmup": warmup
@@ -373,57 +375,40 @@ def generate_smart_bag(inventory, player, course_name, weather):
             return True
         return False
 
-    # A. CORE SLOTS (High Priority)
-    # 1. Putting Putter
+    # A. CORE (WARMUP YES)
+    # Putter
     for idx, _ in sorted_candidates:
-        if shelf.loc[idx]['Typ'] == "Putter": 
-            pick_disc(idx, "Main Putter", "Din primära putter.", True)
-            break
-            
-    # 2. Approach (Zone-style)
-    # Look for low speed, high fade
-    best_app = None
+        if shelf.loc[idx]['Typ'] == "Putter": pick_disc(idx, "Main Putter", True); break
+    
+    # Approach
     for idx, _ in sorted_candidates:
         r = shelf.loc[idx]
-        if r['Speed'] <= 4 and r['Fade'] >= 2.5: best_app = idx; break
-    if best_app: pick_disc(best_app, "Approach (Forehand/Zone)", "Kritisk för inspel och korta forehands.", True)
+        if r['Speed'] <= 4 and r['Fade'] >= 2: pick_disc(idx, "Approach", True); break
 
-    # 3. Straight/Workhorse Driver
-    # Look for Glide + Neutral stability
-    best_work = None
+    # Workhorse
     for idx, _ in sorted_candidates:
         r = shelf.loc[idx]
-        if "Driver" in r['Typ'] and r['Turn'] >= -1 and r['Fade'] <= 2.5: best_work = idx; break
-    if best_work: pick_disc(best_work, "Primary Driver", "Arbetshäst för raka kast.", True)
-
-    # B. PHYSICS SPECIALISTS (From Simulation)
-    target_count = 8
+        if r['Speed'] >= 5 and r['Speed'] <= 9 and r['Turn'] >= -1: pick_disc(idx, "Workhorse", True); break
+        
+    # B. UTILITY / SPECIALIST (WARMUP NO)
+    # Understable
+    for idx, _ in sorted_candidates:
+        if shelf.loc[idx]['Turn'] <= -2: pick_disc(idx, "Utility (US)", False); break
+        
+    # Overstable
+    for idx, _ in sorted_candidates:
+        if shelf.loc[idx]['Fade'] >= 3: pick_disc(idx, "Utility (OS)", False); break
+        
+    # C. FILLERS (Based on Score)
+    target = 8
     for idx, score in sorted_candidates:
-        if len(selected_indices) >= target_count: break
-        
+        if len(selected_indices) >= target: break
         row = shelf.loc[idx]
-        # Infer role from stats
-        if row['Turn'] <= -2: role = "Turnover/Roller"
-        elif row['Fade'] >= 3: role = "Utility/Wind"
-        elif row['Speed'] >= 11: role = "Distance"
-        else: role = f"Specialist ({row['Typ']})"
-        
-        # Determine Warmup (Drivers/Mids = Yes, Utility = No)
-        do_warmup = True if abs(row['Turn']) < 2 and row['Fade'] < 3 else False
-        
-        pick_disc(idx, role, None, do_warmup)
-        
-    # C. SAFETY NET
-    # Ensure at least one understable disc
-    has_us = any([shelf.loc[i]['Turn'] <= -2 for i in selected_indices])
-    if not has_us:
-        flippy = shelf.sort_values("Turn", ascending=True).iloc[0]
-        if flippy.name not in selected_indices:
-             pick_disc(flippy.name, "Räddaren", "Förlåtande disc om orken tryter.", False)
+        role = f"Specialist ({row['Typ']})"
+        warmup = True if abs(row['Turn']) < 2 and row['Fade'] < 3 else False
+        pick_disc(idx, role, warmup)
 
-    # Save to session
     st.session_state.bag_roles = {shelf.loc[r['idx']]['Modell']: r for r in recommendations}
-
     return recommendations
 
 def simulate_flight(speed, glide, turn, fade, power_factor=1.0):
@@ -503,7 +488,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v74.0 Forehand & Physics</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v74.2 Lygnevi Special & Bag Logic</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
