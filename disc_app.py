@@ -60,7 +60,7 @@ st.markdown("""
 # Google Sheets Setup
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# --- MASTER COURSE LIST (Standardized Names) ---
+# --- MASTER COURSE LIST ---
 def build_holes(lengths, pars=None, shapes=None):
     if pars is None: pars = [3] * len(lengths)
     if shapes is None: shapes = ["Rak"] * len(lengths)
@@ -207,9 +207,9 @@ def load_data_from_sheet():
             for r in course_data:
                 try:
                     h_json = json.loads(r["Holes_JSON"]) if isinstance(r["Holes_JSON"], str) else r["Holes_JSON"]
-                    # Only overwrite if name matches exactly, otherwise keep master
-                    if r["Name"] in courses_dict:
-                        courses_dict[r["Name"]] = {"lat": float(r["Lat"]), "lon": float(r["Lon"]), "holes": h_json}
+                    # Priority to master logic for now to ensure fixes work
+                    if r["Name"] in MASTER_COURSES:
+                         courses_dict[r["Name"]] = MASTER_COURSES[r["Name"]]
                     else:
                         courses_dict[r["Name"]] = {"lat": float(r["Lat"]), "lon": float(r["Lon"]), "holes": h_json}
                 except: pass
@@ -367,7 +367,7 @@ def get_race_engineer_advice(player, bag_df, hole_info, weather, situation, dist
     response = ask_ai(msgs)
     return response.replace("```html", "").replace("```", "").strip()
 
-# --- UPGRADED SMART BAG LOGIC (THE TEAM PRINCIPAL v79.0) ---
+# --- UPGRADED SMART BAG LOGIC (THE DIRECTOR'S CUT v79.1) ---
 def generate_smart_bag(inventory, player, course_name, weather):
     holes = st.session_state.courses[course_name]["holes"]
     p_inv = inventory[inventory["Owner"] == player]
@@ -375,7 +375,7 @@ def generate_smart_bag(inventory, player, course_name, weather):
     
     if shelf.empty: return []
 
-    # 1. RUN SIMULATION FOR DATA
+    # 1. RUN SIMULATION FOR DATA (10k)
     disc_scores = {idx: 0 for idx in shelf.index}
     disc_reasons = {idx: [] for idx in shelf.index}
     
@@ -398,19 +398,42 @@ def generate_smart_bag(inventory, player, course_name, weather):
                 disc_scores[idx] += score
                 disc_reasons[idx].append(f"Hål {h_id}")
 
-    # 2. STRICT SLOTTING (THE TEAM PRINCIPAL)
+    # 2. STORYTELLER TEXT GENERATION
+    def get_storyteller_reason(row, wind):
+        sp = row['Speed']; tu = row['Turn']; fa = row['Fade']
+        
+        if sp <= 3:
+            if fa >= 2: return "Drivande Putter. Tål kraft från tee utan att flippa. Säkra inspel."
+            if tu <= -1: return "Touch Putter. För långa anhyzer-puttar och 'get out of trouble'."
+            return "Cirkel-putter. För maximal känsla och precision på green."
+            
+        if sp >= 4 and sp <= 5: # Mids
+            if fa >= 3: return "Zone-klass. Extremt pålitlig fade. Vindtålig approach och forehand-chip."
+            if tu <= -2: return "Turnover Mid. Driver mjukt höger (RHBH) utan ansträngning. Skogsräddare."
+            if abs(tu+fa) < 1: return "Laser-rak Mid. Håller tunneln perfekt utan att driva ut i ruffen."
+            return "All-round Mid. Täcker både hyzer och anhyzer linjer."
+            
+        if sp >= 6 and sp <= 9: # Fairways
+            if fa >= 3: return "Firebird-klass. Skarpa hörn och hård motvind. Går alltid vänster."
+            if tu <= -2.5: return "Roller/Scramble. Tar sig ur omöjliga lägen eller rullar långt."
+            if tu >= -1 and fa <= 2: return "Teebird-klass. Arbetshäst. Kontrollerad längd med säker fade."
+            if tu <= -1 and fa <= 1: return "Leopard-klass. Hyzer-flip maskin. Rätar upp sig för maximal raka längd."
+            
+        if sp >= 10: # Distance
+            if wind > 5 and fa >= 2.5: return f"Vind-Driver. {wind}m/s kräver denna stabilitet för att inte straffas."
+            if tu <= -1 and fa <= 2: return "Max Distans. S-kurva som sväljer meter på öppna hål."
+            return "Kontroll-Driver. När du behöver längd men måste landa inom banan."
+        return "Mångsidig disc som fyller en lucka i stabiliteten."
+
+    # 3. STRICT SLOTTING (THE TEAM PRINCIPAL)
     sorted_discs = sorted(disc_scores.items(), key=lambda x: x[1], reverse=True)
     recommendations = []
     selected_indices = []
     
-    def pick_disc(idx, role, warmup, forced_reason=None):
+    def pick_disc(idx, role, warmup):
         if idx not in selected_indices:
             row = shelf.loc[idx]
-            reasons = disc_reasons[idx]
-            if forced_reason: why = forced_reason
-            elif reasons: why = f"Toppval för {', '.join(reasons[:2])}."
-            else: why = "Nödvändig för balans."
-            
+            why = get_storyteller_reason(row, weather['wind'])
             recommendations.append({
                 "idx": idx, "model": row["Modell"], "role": role, 
                 "reason": why, "warmup": warmup
@@ -435,39 +458,39 @@ def generate_smart_bag(inventory, player, course_name, weather):
     # --- PHASE 1: PUTTERS (Min 2) ---
     # A. Putting Putter (Slowest)
     idx = find_best_fit(lambda r: r['Typ'] == 'Putter')
-    if idx: pick_disc(idx, "Main Putter", True, "Din primära putter.")
+    if idx: pick_disc(idx, "Main Putter", True)
     
     # B. Throwing/Approach Putter (Stable)
     idx = find_best_fit(lambda r: r['Speed'] <= 4 and r['Fade'] >= 1.5 and r.name not in selected_indices)
-    if idx: pick_disc(idx, "Throwing Putter", True, "För inspel och drives.")
+    if idx: pick_disc(idx, "Throwing Putter", True)
 
     # --- PHASE 2: MIDRANGES (Min 2) ---
     # A. Straight Mid
     idx = find_best_fit(lambda r: r['Typ'] == 'Midrange' and abs(r['Turn']+r['Fade']) < 2)
-    if idx: pick_disc(idx, "Straight Mid", True, "Rak linje.")
+    if idx: pick_disc(idx, "Straight Mid", True)
     
     # B. Utility Mid (Over or Understable)
     idx = find_best_fit(lambda r: r['Typ'] == 'Midrange' and (r['Fade'] >= 2.5 or r['Turn'] <= -2))
-    if idx: pick_disc(idx, "Utility Mid", False, "Speciallinjer.")
+    if idx: pick_disc(idx, "Utility Mid", False)
 
     # --- PHASE 3: FAIRWAYS (Min 2) ---
     # A. Workhorse
     idx = find_best_fit(lambda r: r['Typ'] == 'Fairway Driver' and r['Turn'] >= -1 and r['Fade'] <= 2.5)
-    if idx: pick_disc(idx, "Workhorse Fairway", True, "Arbetshäst.")
+    if idx: pick_disc(idx, "Workhorse Fairway", True)
     
     # B. Complement
     idx = find_best_fit(lambda r: r['Typ'] == 'Fairway Driver' and r.name not in selected_indices)
-    if idx: pick_disc(idx, "Fairway Complement", False, "Variation.")
+    if idx: pick_disc(idx, "Fairway Complement", False)
 
     # --- PHASE 4: DISTANCE (Conditional) ---
     max_len = max([h['l'] for h in holes.values()])
     if max_len > 100:
         idx = find_best_fit(lambda r: r['Speed'] >= 10)
-        if idx: pick_disc(idx, "Distance Driver", True, "Max längd.")
+        if idx: pick_disc(idx, "Distance Driver", True)
         
         # Backup/Wind distance
         idx = find_best_fit(lambda r: r['Speed'] >= 10 and r.name not in selected_indices)
-        if idx: pick_disc(idx, "Distance/Wind", False, "Backup/Vind.")
+        if idx: pick_disc(idx, "Distance/Wind", False)
 
     # --- PHASE 5: FILL UP TO 8 (Best Remaining) ---
     for idx, score in sorted_discs:
@@ -554,7 +577,7 @@ if not st.session_state.logged_in:
 # --- MAIN APP ---
 with st.sidebar:
     st.title("🏎️ SCUDERIA CLOUD")
-    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v79.0 The Team Principal</div>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: #fff200; margin-bottom: 0px;'>👤 {st.session_state.current_user}</h3><div style='color: #cccccc; font-size: 12px; margin-bottom: 20px;'>v79.1 The Director's Cut</div>", unsafe_allow_html=True)
     
     if st.button("Logga Ut"):
         st.session_state.logged_in = False
