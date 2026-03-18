@@ -5,8 +5,6 @@ import altair as alt
 import folium
 from streamlit_folium import st_folium
 from datetime import datetime
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from openai import OpenAI
 import base64
 import json
@@ -24,6 +22,67 @@ try:
     from scipy.interpolate import make_interp_spline
 except ImportError:
     make_interp_spline = None
+
+import bcrypt
+
+# --- SUPABASE AUTH ---
+_SUPABASE_URL      = "https://jpeijjnpkayzrgdefjxi.supabase.co"
+_PLACEHOLDER_HASH  = "$2b$12$placeholder_migration_hash_1234"
+
+def _sb_key() -> str:
+    try:
+        return st.secrets["supabase"]["service_role_key"]
+    except Exception:
+        return ""
+
+def _sb_get_user(username: str) -> dict | None:
+    """Fetch {id, pin_hash, role} for a user from Supabase."""
+    try:
+        url = f"{_SUPABASE_URL}/rest/v1/users?username=eq.{requests.utils.quote(username)}&select=id,pin_hash,role"
+        r = requests.get(url, headers={"apikey": _sb_key(), "Authorization": f"Bearer {_sb_key()}"}, timeout=5)
+        rows = r.json()
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+def _sb_update_pin(username: str, new_hash: str) -> bool:
+    """Persist a new bcrypt pin_hash for the user in Supabase."""
+    try:
+        url = f"{_SUPABASE_URL}/rest/v1/users?username=eq.{requests.utils.quote(username)}"
+        r = requests.patch(url, json={"pin_hash": new_hash},
+                           headers={"apikey": _sb_key(), "Authorization": f"Bearer {_sb_key()}",
+                                    "Prefer": "return=minimal"}, timeout=5)
+        return r.status_code in (200, 204)
+    except Exception:
+        return False
+
+def _check_pin(username: str, pin: str) -> tuple[bool, bool]:
+    """
+    Verify PIN against Supabase.
+    Returns (authenticated, needs_reset).
+    needs_reset=True when the stored hash is the migration placeholder.
+    Falls back to Google Sheets plain-text PIN if Supabase is unreachable.
+    """
+    row = _sb_get_user(username)
+    if row is None:
+        # Supabase unavailable — fall back to plain-text from loaded users df
+        users = st.session_state.get("users")
+        if users is not None and not users.empty:
+            match = users[users["Username"] == username]
+            if not match.empty:
+                return str(match.iloc[0]["PIN"]) == str(pin), False
+        return False, False
+
+    h = row.get("pin_hash", "")
+    if h == _PLACEHOLDER_HASH:
+        return True, True   # First login — force PIN setup regardless of what was typed
+    if h.startswith("$2b$"):
+        try:
+            return bcrypt.checkpw(pin.encode(), h.encode()), False
+        except Exception:
+            return False, False
+    # Legacy plain-text PIN still in Supabase
+    return h == pin, False
 
 # --- 1. KONFIGURATION & SETUP ---
 st.set_page_config(page_title="Scuderia Wonka Caddy", page_icon="🏎️", layout="wide")
@@ -58,8 +117,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Google Sheets Setup
-SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
 # --- MASTER COURSE LIST (VERIFIED) ---
 def build_holes(lengths, pars=None, shapes=None):
     if pars is None: pars = [3] * len(lengths)
@@ -140,113 +197,231 @@ MASTER_COURSES = {
      "Romeleåsen": {"lat": 55.597, "lon": 13.435, "holes": build_holes([100]*18)}
 }
 
-@st.cache_resource
-def get_gsheet_client():
+# ── SUPABASE LOW-LEVEL HELPERS ────────────────────────────────────────────────
+def _sb_headers_full() -> dict:
+    key = _sb_key()
+    return {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+def _sb_fetch(table: str, select: str = "*", params: dict | None = None) -> list:
+    r = requests.get(
+        f"{_SUPABASE_URL}/rest/v1/{table}",
+        headers={k: v for k, v in _sb_headers_full().items() if k != "Content-Type"},
+        params={"select": select, **(params or {})},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+def _sb_insert(table: str, rows) -> list:
+    if not rows: return []
+    if isinstance(rows, dict): rows = [rows]
+    r = requests.post(
+        f"{_SUPABASE_URL}/rest/v1/{table}",
+        headers={**_sb_headers_full(), "Prefer": "return=representation,resolution=ignore-duplicates"},
+        json=rows, timeout=10,
+    )
+    return r.json() if r.status_code in (200, 201) else []
+
+def _sb_patch_rows(table: str, filters: dict, data: dict) -> bool:
+    r = requests.patch(
+        f"{_SUPABASE_URL}/rest/v1/{table}",
+        headers={**_sb_headers_full(), "Prefer": "return=minimal"},
+        params={k: f"eq.{v}" for k, v in filters.items()},
+        json=data, timeout=10,
+    )
+    return r.status_code in (200, 204)
+
+def _sb_delete(table: str, filters: dict) -> bool:
+    r = requests.delete(
+        f"{_SUPABASE_URL}/rest/v1/{table}",
+        headers={k: v for k, v in _sb_headers_full().items() if k != "Content-Type"},
+        params={k: f"eq.{v}" for k, v in filters.items()},
+        timeout=10,
+    )
+    return r.status_code in (200, 204)
+
+def _sb_delete_all(table: str) -> bool:
+    r = requests.delete(
+        f"{_SUPABASE_URL}/rest/v1/{table}",
+        headers={k: v for k, v in _sb_headers_full().items() if k != "Content-Type"},
+        params={"id": "neq.00000000-0000-0000-0000-000000000000"},
+        timeout=10,
+    )
+    return r.status_code in (200, 204)
+
+# ── DATA LOAD ─────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def load_data_from_supabase():
     try:
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
-        return gspread.authorize(creds)
-    except Exception as e: return None
+        # Users
+        user_rows       = _sb_fetch("users", "id,username,pin_hash,role,active,municipality")
+        user_id_to_name = {r["id"]: r["username"] for r in user_rows}
+        user_name_to_id = {r["username"]: r["id"] for r in user_rows}
+        users_df = pd.DataFrame([{
+            "Username":     r["username"],
+            "PIN":          r["pin_hash"],
+            "Role":         r["role"],
+            "Active":       r["active"],
+            "Municipality": r.get("municipality") or "Unknown",
+        } for r in user_rows])
 
-def clean_numeric_value(val):
-    if pd.isna(val): return 0.0
-    s = str(val).strip().replace(',', '.').replace('−', '-').replace('–', '-').replace('—', '-')
-    s = re.sub(r'[^-0-9.]', '', s)
-    try: return float(s)
-    except: return 0.0
+        # Courses + Holes
+        course_rows       = _sb_fetch("courses", "id,name,lat,lon")
+        hole_rows         = _sb_fetch("holes",   "id,course_id,hole_number,length_m,par,shape")
+        course_id_to_name = {r["id"]: r["name"] for r in course_rows}
+        course_name_to_id = {r["name"]: r["id"] for r in course_rows}
+        courses_dict = {r["name"]: {"lat": r["lat"], "lon": r["lon"], "holes": {}} for r in course_rows}
+        hole_id_map      = {}   # hole_id → {course_name, hole_number}
+        hole_course_map  = {}   # course_name → {hole_number_int → hole_id}
+        for h in hole_rows:
+            cname = course_id_to_name.get(h["course_id"])
+            if not cname: continue
+            courses_dict[cname]["holes"][str(h["hole_number"])] = {
+                "l": h["length_m"], "p": h["par"], "shape": h.get("shape") or "Rak",
+            }
+            hole_id_map[h["id"]] = {"course": cname, "num": h["hole_number"]}
+            hole_course_map.setdefault(cname, {})[h["hole_number"]] = h["id"]
 
-def load_data_from_sheet():
-    client = get_gsheet_client()
-    if not client: return None, None, None, None
-    courses_dict = {}
-    users_df = pd.DataFrame()
-    try:
-        sheet = client.open("DiscCaddy_DB")
-        try: ws_users = sheet.worksheet("Users")
-        except: 
-            ws_users = sheet.add_worksheet("Users", 100, 5)
-            ws_users.append_row(["Username", "PIN", "Role", "Active", "Municipality"])
-            ws_users.append_row(["Admin", "1234", "Admin", "True", "Kungsbacka"]) 
-        users_df = pd.DataFrame(ws_users.get_all_records())
-        if users_df.empty: users_df = pd.DataFrame(columns=["Username", "PIN", "Role", "Active"])
-        if "Municipality" not in users_df.columns: users_df["Municipality"] = "Unknown"
+        # Inventory
+        disc_rows = _sb_fetch("discs", "id,owner_id,model,manufacturer,plastic,disc_type,speed,glide,turn,fade,stability,status")
+        inv_df = pd.DataFrame([{
+            "_disc_id":    r["id"],
+            "Owner":       user_id_to_name.get(r["owner_id"], "Unknown"),
+            "Modell":      r["model"],
+            "Tillverkare": r.get("manufacturer") or "",
+            "Plast":       r.get("plastic") or "",
+            "Typ":         r.get("disc_type") or "",
+            "Speed":       float(r["speed"] or 0),
+            "Glide":       float(r["glide"] or 0),
+            "Turn":        float(r["turn"] or 0),
+            "Fade":        float(r["fade"] or 0),
+            "Stabilitet":  r.get("stability") or "",
+            "Status":      r.get("status") or "Shelf",
+        } for r in disc_rows]) if disc_rows else pd.DataFrame(
+            columns=["_disc_id","Owner","Modell","Tillverkare","Plast","Typ","Speed","Glide","Turn","Fade","Stabilitet","Status"])
 
-        req_cols = ["Owner", "Modell", "Tillverkare", "Plast", "Typ", "Speed", "Glide", "Turn", "Fade", "Stabilitet", "Status"]
-        try: ws_inv = sheet.worksheet("Inventory")
-        except: ws_inv = sheet.add_worksheet("Inventory", 100, 11); ws_inv.append_row(req_cols)
-        
-        df_inv = pd.DataFrame(ws_inv.get_all_records())
-        if df_inv.empty: df_inv = pd.DataFrame(columns=req_cols)
+        # History (hole_scores joined in Python)
+        round_rows = _sb_fetch("rounds",      "id,player_id,course_id,played_at")
+        score_rows = _sb_fetch("hole_scores", "round_id,hole_id,score,par,disc_name")
+        round_map  = {r["id"]: r for r in round_rows}
+        hist_rows  = []
+        for s in score_rows:
+            rnd  = round_map.get(s["round_id"])
+            hole = hole_id_map.get(s["hole_id"])
+            if not rnd or not hole: continue
+            hist_rows.append({
+                "Datum":    str(rnd["played_at"]),
+                "Bana":     course_id_to_name.get(rnd["course_id"], "Unknown"),
+                "Spelare":  user_id_to_name.get(rnd["player_id"], "Unknown"),
+                "Hål":      str(hole["num"]),
+                "Resultat": int(s["score"]),
+                "Par":      int(s["par"]),
+                "Disc_Used": s.get("disc_name") or "Unknown",
+            })
+        hist_df = pd.DataFrame(hist_rows) if hist_rows else pd.DataFrame(
+            columns=["Datum","Bana","Spelare","Hål","Resultat","Par","Disc_Used"])
+
+        # Stash ID maps so write helpers can resolve names → UUIDs
+        st.session_state._sb_user_name_to_id  = user_name_to_id
+        st.session_state._sb_course_name_to_id = course_name_to_id
+        st.session_state._sb_hole_course_map   = hole_course_map
+
+        return inv_df, hist_df, courses_dict, users_df
+    except Exception as e:
+        st.error(f"Supabase Error: {e}")
+        return pd.DataFrame(), pd.DataFrame(), MASTER_COURSES, pd.DataFrame()
+
+# ── INVENTORY WRITE ───────────────────────────────────────────────────────────
+def save_inventory_to_sb(df: pd.DataFrame):
+    """Full replace per owner: delete all their discs, re-insert from df."""
+    if df.empty: return
+    VALID_TYPES  = {"Putter", "Midrange", "Fairway Driver", "Distance Driver"}
+    VALID_STATUS = {"Bag", "Shelf"}
+    name_to_id   = st.session_state.get("_sb_user_name_to_id", {})
+    for owner, owner_df in df.groupby("Owner"):
+        uid = name_to_id.get(owner)
+        if not uid: continue
+        _sb_delete("discs", {"owner_id": uid})
+        rows = []
+        for _, row in owner_df.iterrows():
+            dtype  = str(row.get("Typ", "")).strip()
+            status = str(row.get("Status", "Shelf")).strip()
+            rows.append({
+                "owner_id":     uid,
+                "model":        str(row["Modell"]).strip(),
+                "manufacturer": str(row.get("Tillverkare", "")).strip() or None,
+                "plastic":      str(row.get("Plast", "")).strip() or None,
+                "disc_type":    dtype  if dtype  in VALID_TYPES  else None,
+                "speed":        float(row.get("Speed", 0)),
+                "glide":        float(row.get("Glide", 0)),
+                "turn":         float(row.get("Turn",  0)),
+                "fade":         float(row.get("Fade",  0)),
+                "status":       status if status in VALID_STATUS else "Shelf",
+            })
+        if rows: _sb_insert("discs", rows)
+
+# ── HISTORY WRITE ─────────────────────────────────────────────────────────────
+def append_history_to_sb(rows: list):
+    """Write new round history rows → rounds + hole_scores tables."""
+    if not rows: return
+    from collections import defaultdict
+    name_to_id   = st.session_state.get("_sb_user_name_to_id",  {})
+    course_to_id = st.session_state.get("_sb_course_name_to_id", {})
+    hole_map     = st.session_state.get("_sb_hole_course_map",   {})
+    round_groups = defaultdict(list)
+    for r in rows:
+        round_groups[(r["Spelare"], r["Bana"], r["Datum"])].append(r)
+    for (player, course, date), hole_rows in round_groups.items():
+        uid = name_to_id.get(player)
+        cid = course_to_id.get(course)
+        if not uid or not cid: continue
+        inserted = _sb_insert("rounds", {"player_id": uid, "course_id": cid, "played_at": date})
+        if inserted:
+            round_id = inserted[0]["id"]
         else:
-            for c in req_cols: 
-                if c not in df_inv.columns: df_inv[c] = ""
-            
-            numeric_cols = ["Speed", "Glide", "Turn", "Fade"]
-            for col in numeric_cols:
-                df_inv[col] = df_inv[col].apply(clean_numeric_value)
-                if not df_inv[col].empty:
-                     mask_high = df_inv[col] > 16.0
-                     df_inv.loc[mask_high, col] = df_inv.loc[mask_high, col] / 10.0
-            
-            if "Status" not in df_inv.columns: df_inv["Status"] = "Shelf"
-            df_inv["Status"] = df_inv["Status"].fillna("Shelf")
+            existing = _sb_fetch("rounds", "id", {"player_id": f"eq.{uid}", "course_id": f"eq.{cid}", "played_at": f"eq.{date}", "order": "created_at.desc", "limit": "1"})
+            if not existing: continue
+            round_id = existing[0]["id"]
+        c_holes = hole_map.get(course, {})
+        score_rows = []
+        for hr in hole_rows:
+            h_num   = int(hr["Hål"]) if str(hr["Hål"]).isdigit() else None
+            hole_id = c_holes.get(h_num) if h_num else None
+            if not hole_id or int(hr["Resultat"]) < 1: continue
+            score_rows.append({
+                "round_id":  round_id,
+                "hole_id":   hole_id,
+                "score":     int(hr["Resultat"]),
+                "par":       int(hr["Par"]),
+                "disc_name": hr.get("Disc_Used") or None,
+            })
+        if score_rows: _sb_insert("hole_scores", score_rows)
 
-        try: ws_hist = sheet.worksheet("History")
-        except: ws_hist = sheet.add_worksheet("History", 100, 10); ws_hist.append_row(["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
-        df_hist = pd.DataFrame(ws_hist.get_all_records())
-        if df_hist.empty: df_hist = pd.DataFrame(columns=["Datum", "Bana", "Spelare", "Hål", "Resultat", "Par", "Disc_Used"])
+# ── COURSE WRITE ──────────────────────────────────────────────────────────────
+def add_course_to_sb(name: str, lat: float, lon: float, holes_dict: dict):
+    """Insert a new course + holes. Updates session-state caches immediately."""
+    inserted = _sb_insert("courses", {"name": name, "lat": lat, "lon": lon})
+    if inserted:
+        cid = inserted[0]["id"]
+    else:
+        existing = _sb_fetch("courses", "id", {"name": f"eq.{name}"})
+        if not existing: return
+        cid = existing[0]["id"]
+    hole_rows = [{
+        "course_id": cid, "hole_number": int(h), "length_m": int(d.get("l", 100)),
+        "par": int(d.get("p", 3)), "shape": d.get("shape") or None,
+    } for h, d in holes_dict.items()]
+    if hole_rows: _sb_insert("holes", hole_rows)
+    st.session_state.setdefault("_sb_course_name_to_id", {})[name] = cid
 
-        try: ws_courses = sheet.worksheet("Courses")
-        except: 
-            ws_courses = sheet.add_worksheet("Courses", 100, 5)
-            ws_courses.append_row(["Name", "Lat", "Lon", "Holes_JSON"])
-        course_data = ws_courses.get_all_records()
-        
-        courses_dict = MASTER_COURSES.copy()
-        if course_data:
-            for r in course_data:
-                try:
-                    h_json = json.loads(r["Holes_JSON"]) if isinstance(r["Holes_JSON"], str) else r["Holes_JSON"]
-                    # Priority to master logic for now to ensure fixes work
-                    if r["Name"] in MASTER_COURSES:
-                         courses_dict[r["Name"]] = MASTER_COURSES[r["Name"]]
-                    else:
-                        courses_dict[r["Name"]] = {"lat": float(r["Lat"]), "lon": float(r["Lon"]), "holes": h_json}
-                except: pass
-        return df_inv, df_hist, courses_dict, users_df
-    except Exception as e: st.error(f"DB Error: {e}"); return pd.DataFrame(), pd.DataFrame(), MASTER_COURSES, pd.DataFrame()
-
-def save_to_sheet(df, worksheet_name):
-    client = get_gsheet_client()
-    if not client: return
+def hard_reset_courses_sb() -> bool:
+    """Delete all courses (cascades to holes) and re-seed from MASTER_COURSES."""
     try:
-        sheet = client.open("DiscCaddy_DB")
-        ws = sheet.worksheet(worksheet_name)
-        if df.empty and worksheet_name == "Inventory": pass 
-        ws.clear(); ws.update([df.columns.values.tolist()] + df.values.tolist())
-    except Exception as e: st.error(f"Save Error: {e}")
-
-def add_course_to_sheet(name, lat, lon, holes_dict):
-    client = get_gsheet_client()
-    if not client: return
-    try:
-        sheet = client.open("DiscCaddy_DB")
-        ws = sheet.worksheet("Courses")
-        ws.append_row([name, lat, lon, json.dumps(holes_dict)])
-    except: pass
-
-def hard_reset_courses():
-    client = get_gsheet_client()
-    if not client: return
-    try:
-        sheet = client.open("DiscCaddy_DB")
-        ws = sheet.worksheet("Courses")
-        ws.clear()
-        ws.append_row(["Name", "Lat", "Lon", "Holes_JSON"])
+        _sb_delete_all("courses")
         for name, data in MASTER_COURSES.items():
-            ws.append_row([name, data["lat"], data["lon"], json.dumps(data["holes"])])
+            add_course_to_sb(name, data["lat"], data["lon"], data["holes"])
         return True
-    except Exception as e: 
+    except Exception as e:
         st.error(f"Reset failed: {e}")
         return False
 
@@ -274,6 +449,7 @@ def find_courses_via_osm_api(lat, lon, radius=10000):
     except: return []
 
 # --- AI & ANALYTICS ---
+@st.cache_data(ttl=600)
 def get_live_weather(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms"
@@ -282,6 +458,7 @@ def get_live_weather(lat, lon):
     except: pass
     return None
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def ask_ai(messages):
     try:
         client = OpenAI(api_key=st.secrets["openai_key"])
@@ -532,7 +709,7 @@ def simulate_flight(speed, glide, turn, fade, power_factor=1.0):
 # --- STATE INIT ---
 if 'data_loaded' not in st.session_state:
     with st.spinner("Startar system..."):
-        i, h, c, u = load_data_from_sheet()
+        i, h, c, u = load_data_from_supabase()
         st.session_state.inventory = i
         st.session_state.history = h
         st.session_state.courses = c
@@ -547,6 +724,8 @@ if st.session_state.get('logged_in') and not st.session_state.users.empty:
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'current_user' not in st.session_state: st.session_state.current_user = None
 if 'user_role' not in st.session_state: st.session_state.user_role = None
+if 'pin_reset_mode' not in st.session_state: st.session_state.pin_reset_mode = False
+if 'pin_reset_user' not in st.session_state: st.session_state.pin_reset_user = None
 if 'active_players' not in st.session_state: st.session_state.active_players = []
 if 'current_scores' not in st.session_state: st.session_state.current_scores = {}
 if 'selected_discs' not in st.session_state: st.session_state.selected_discs = {}
@@ -567,23 +746,66 @@ if 'bag_roles' not in st.session_state: st.session_state.bag_roles = {}
 # --- LOGIN SCREEN ---
 if not st.session_state.logged_in:
     st.title("🔐 SCUDERIA PADDOCK")
-    c_login = st.container()
-    with c_login:
-        users = st.session_state.users
-        if not users.empty:
-            user_list = users["Username"].tolist()
-            sel_user = st.selectbox("Välj Förare", user_list)
-            pin_in = st.text_input("PIN", type="password")
-            if st.button("Lås Upp 🔓", type="primary"):
-                user_row = users[users["Username"] == sel_user].iloc[0]
-                if str(user_row["PIN"]) == str(pin_in):
-                    st.session_state.logged_in = True
-                    st.session_state.current_user = sel_user
-                    st.session_state.user_role = user_row["Role"]
-                    st.session_state.active_players = [sel_user] 
-                    st.success("Access Granted"); st.rerun()
-                else: st.error("Fel PIN.")
-        else: st.error("Inga användare.")
+
+    # ── PIN RESET MODE ───────────────────────────────────────────────────────
+    if st.session_state.pin_reset_mode:
+        username = st.session_state.pin_reset_user
+        st.info(f"👋 Välkommen **{username}**! Välj en ny PIN-kod för ditt konto.")
+        with st.form("pin_reset_form"):
+            new_pin  = st.text_input("Ny PIN (4 siffror)", type="password", max_chars=4)
+            conf_pin = st.text_input("Bekräfta PIN", type="password", max_chars=4)
+            submitted = st.form_submit_button("Spara PIN 🔒", type="primary")
+            if submitted:
+                if len(new_pin) != 4 or not new_pin.isdigit():
+                    st.error("PIN måste vara exakt 4 siffror.")
+                elif new_pin != conf_pin:
+                    st.error("PIN-koderna matchar inte.")
+                else:
+                    new_hash = bcrypt.hashpw(new_pin.encode(), bcrypt.gensalt()).decode()
+                    if _sb_update_pin(username, new_hash):
+                        # Fetch role from Supabase to complete login
+                        sb_row = _sb_get_user(username)
+                        role   = sb_row["role"] if sb_row else "Player"
+                        st.session_state.logged_in    = True
+                        st.session_state.current_user = username
+                        st.session_state.user_role    = role
+                        st.session_state.active_players = [username]
+                        st.session_state.pin_reset_mode = False
+                        st.session_state.pin_reset_user = None
+                        st.success("PIN satt! Välkommen in 🏎️")
+                        st.rerun()
+                    else:
+                        st.error("Kunde inte spara PIN — kontrollera Supabase-nyckeln i secrets.")
+        if st.button("← Tillbaka"):
+            st.session_state.pin_reset_mode = False
+            st.session_state.pin_reset_user = None
+            st.rerun()
+        st.stop()
+
+    # ── NORMAL LOGIN ─────────────────────────────────────────────────────────
+    users = st.session_state.users
+    if not users.empty:
+        user_list = users["Username"].tolist()
+        sel_user  = st.selectbox("Välj Förare", user_list)
+        pin_in    = st.text_input("PIN", type="password")
+        if st.button("Lås Upp 🔓", type="primary"):
+            authenticated, needs_reset = _check_pin(sel_user, pin_in)
+            if needs_reset:
+                st.session_state.pin_reset_mode = True
+                st.session_state.pin_reset_user = sel_user
+                st.rerun()
+            elif authenticated:
+                sb_row = _sb_get_user(sel_user)
+                role   = sb_row["role"] if sb_row else users[users["Username"] == sel_user].iloc[0]["Role"]
+                st.session_state.logged_in    = True
+                st.session_state.current_user = sel_user
+                st.session_state.user_role    = role
+                st.session_state.active_players = [sel_user]
+                st.success("Access Granted"); st.rerun()
+            else:
+                st.error("Fel PIN.")
+    else:
+        st.error("Inga användare.")
     st.stop()
 
 # --- MAIN APP ---
@@ -655,10 +877,10 @@ with st.sidebar:
                 selected_data = next((item for item in st.session_state.found_courses if item["name"] == sel_new_c), None)
                 if selected_data:
                     std_holes = {str(x): {"l": 100, "p": 3, "shape": "Rak"} for x in range(1, 19)}
-                    add_course_to_sheet(selected_data["name"], selected_data["lat"], selected_data["lon"], std_holes)
+                    add_course_to_sb(selected_data["name"], selected_data["lat"], selected_data["lon"], std_holes)
                     st.success(f"{sel_new_c} tillagd!")
                     st.session_state.found_courses = []
-                    st.cache_resource.clear(); st.rerun()
+                    st.cache_data.clear(); st.rerun()
 
     if 'selected_course' not in st.session_state or sel_course != st.session_state.selected_course:
         st.session_state.selected_course = sel_course
@@ -674,7 +896,7 @@ with st.sidebar:
         hole_wind = st.radio("Vind på tee:", ["Stilla", "Mot", "Med", "Sida"], horizontal=True)
 
     st.divider()
-    if st.button("🔄 Synka Databas"): st.cache_resource.clear(); st.rerun()
+    if st.button("🔄 Synka Databas"): st.cache_data.clear(); st.rerun()
 
 # --- TABS ---
 tabs = ["🔥 WARM-UP", "🏁 RACE", "🤖 AI-CADDY", "🧳 UTRUSTNING", "📈 TELEMETRY", "🎓 ACADEMY"]
@@ -739,7 +961,8 @@ with current_tab[0]:
             if labels:
                 by_label = dict(zip(labels, handles))
                 ax.legend(by_label.values(), by_label.keys(), facecolor='#1a1a1a', labelcolor='white')
-            c2.pyplot(fig)
+            st.pyplot(fig)
+            plt.close(fig)
     else: st.info("Välj spelare i menyn.")
 
 # TAB 2: RACE
@@ -756,9 +979,18 @@ with current_tab[1]:
     col_n, col_s = st.columns([1, 2])
     with col_n:
         holes = sorted(list(c_data["holes"].keys()), key=lambda x: int(x) if x.isdigit() else x)
-        hole = st.selectbox("Korg #", holes)
+        if 'hole_idx' not in st.session_state:
+            st.session_state.hole_idx = 0
+        st.session_state.hole_idx = min(st.session_state.hole_idx, len(holes) - 1)
+        hole = holes[st.session_state.hole_idx]
         inf = c_data["holes"][hole]
-        st.metric(f"Korg {hole}", f"{inf['l']}m", f"Par {inf['p']}"); st.caption(inf.get('shape', 'Rak'))
+        c_prev, c_next = st.columns(2)
+        if c_prev.button("◀ Föregående", disabled=st.session_state.hole_idx == 0, use_container_width=True):
+            st.session_state.hole_idx -= 1; st.rerun()
+        if c_next.button("Nästa ▶", disabled=st.session_state.hole_idx == len(holes) - 1, use_container_width=True):
+            st.session_state.hole_idx += 1; st.rerun()
+        st.metric(f"Hål {hole} / {len(holes)}", f"{inf['l']}m", f"Par {inf['p']}")
+        st.caption(inf.get('shape', 'Rak'))
     with col_s:
         if hole not in st.session_state.current_scores: st.session_state.current_scores[hole] = {}
         if hole not in st.session_state.selected_discs: st.session_state.selected_discs[hole] = {}
@@ -783,8 +1015,7 @@ with current_tab[1]:
                             delta = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
                     st.markdown(f"<div class='metric-box'><div class='metric-label'>HISTORIK</div><div class='metric-value'>{avg_score}</div><div class='metric-sub'>{delta} vs Par</div></div>", unsafe_allow_html=True)
                 with c_ai:
-                    with st.container(border=True):
-                        st.markdown("**📻 TEAM RADIO (STRATEGY)**")
+                    with st.expander("📻 Team Radio — Strategy Request", expanded=False):
                         form = st.session_state.daily_forms.get(p, 1.0)
                         
                         c_sit1, c_sit2 = st.columns(2)
@@ -818,12 +1049,21 @@ with current_tab[1]:
                         
                         if f"{hole}_{p}" in st.session_state.hole_advice: st.markdown(st.session_state.hole_advice[f"{hole}_{p}"], unsafe_allow_html=True)
                 st.divider()
-                
-                # --- DISC SELECTION (WITH ROLES) ---
-                c_sc1, c_sc2, c_disc = st.columns([1, 1, 3])
-                if c_sc1.button("➖", key=f"m_{hole}_{p}"): st.session_state.current_scores[hole][p] -= 1; st.rerun()
-                c_sc2.markdown(f"<h2 style='text-align:center; color:white;'>{st.session_state.current_scores[hole][p]}</h2>", unsafe_allow_html=True)
-                if c_sc2.button("➕", key=f"p_{hole}_{p}"): st.session_state.current_scores[hole][p] += 1; st.rerun()
+
+                # --- SCORE ENTRY + DISC SELECTION ---
+                c_minus, c_score_display, c_plus = st.columns([1, 2, 1])
+                score_val = st.session_state.current_scores[hole][p]
+                par_diff = score_val - inf['p']
+                diff_str = "E" if par_diff == 0 else f"+{par_diff}" if par_diff > 0 else str(par_diff)
+                c_score_display.markdown(
+                    f"<h1 style='text-align:center; color:white; margin:0;'>{score_val}</h1>"
+                    f"<p style='text-align:center; color:#fff200; margin:0;'>{diff_str}</p>",
+                    unsafe_allow_html=True
+                )
+                if c_minus.button("➖", key=f"m_{hole}_{p}", use_container_width=True):
+                    st.session_state.current_scores[hole][p] -= 1; st.rerun()
+                if c_plus.button("➕", key=f"p_{hole}_{p}", use_container_width=True):
+                    st.session_state.current_scores[hole][p] += 1; st.rerun()
                 
                 p_inv = st.session_state.inventory[st.session_state.inventory["Owner"] == p]
                 bag_discs_rows = p_inv[p_inv["Status"]=="Bag"]
@@ -844,6 +1084,18 @@ with current_tab[1]:
                 opts = ["Välj Disc"] + (bag_options if bag_options else all_discs)
                 st.session_state.selected_discs[hole][p] = c_disc.selectbox("Vald Disc", opts, key=f"ds_{hole}_{p}")
     st.markdown("---")
+    with st.expander("📋 Scorecard Preview", expanded=False):
+        sc_rows = []
+        for h in holes:
+            h_par = c_data["holes"][h]["p"]
+            row = {"Hål": h, "Par": h_par}
+            for p in active_racers:
+                sc_score = st.session_state.current_scores.get(h, {}).get(p, h_par)
+                sc_diff = sc_score - h_par
+                diff_label = "E" if sc_diff == 0 else f"+{sc_diff}" if sc_diff > 0 else str(sc_diff)
+                row[p] = f"{sc_score} ({diff_label})"
+            sc_rows.append(row)
+        st.dataframe(pd.DataFrame(sc_rows), hide_index=True, use_container_width=True)
     if st.button("🏁 SPARA RUNDA & KLIV AV BANAN", type="primary"):
         new_rows = []
         d = datetime.now().strftime("%Y-%m-%d")
@@ -855,7 +1107,7 @@ with current_tab[1]:
                 new_rows.append({"Datum": d, "Bana": bana, "Spelare": p, "Hål": h, "Resultat": s, "Par": c_data["holes"][h]["p"], "Disc_Used": disc_name})
         new_df = pd.DataFrame(new_rows)
         st.session_state.history = pd.concat([st.session_state.history, new_df], ignore_index=True)
-        save_to_sheet(st.session_state.history, "History")
+        append_history_to_sb(new_rows)
         st.balloons(); st.success("Loppet sparat i historiken!"); st.session_state.current_scores = {}
 
 # TAB 3: AI-CADDY
@@ -887,9 +1139,8 @@ with current_tab[3]:
         st.markdown("#### 🤖 Strategen")
         c1, c2, c3 = st.columns([2, 1, 1])
         tc = c1.selectbox("Bana:", list(st.session_state.courses.keys()), key="strat_course")
-        if c2.button("Generera"): 
+        if c2.button("Generera"):
             with st.spinner("🤖 Kör Monte Carlo-simulering (20 000 kast)..."):
-                time.sleep(1.0)
                 st.session_state.suggested_pack = generate_smart_bag(st.session_state.inventory, target_p, tc, st.session_state.weather_data)
             st.rerun()
             
@@ -917,7 +1168,7 @@ with current_tab[3]:
                     st.session_state.inventory.loc[indices_to_update, "Status"] = "Bag"
                     
                     # Save
-                    save_to_sheet(st.session_state.inventory, "Inventory")
+                    save_inventory_to_sb(st.session_state.inventory)
                     
                     # Clear recommendations
                     st.session_state.suggested_pack = []
@@ -941,13 +1192,13 @@ with current_tab[3]:
                 mask = shelf_items['Display'].isin(selected_shelf)
                 indices_to_move = shelf_items[mask].index
                 st.session_state.inventory.loc[indices_to_move, "Status"] = "Bag"
-                save_to_sheet(st.session_state.inventory, "Inventory")
+                save_inventory_to_sb(st.session_state.inventory)
                 st.rerun()
             if st.button("🗑️ Skrota (Radera)", key="del_shelf"):
                 mask = shelf_items['Display'].isin(selected_shelf)
                 indices_to_drop = shelf_items[mask].index
                 st.session_state.inventory = st.session_state.inventory.drop(indices_to_drop)
-                save_to_sheet(st.session_state.inventory, "Inventory")
+                save_inventory_to_sb(st.session_state.inventory)
                 st.rerun()
         else:
             st.caption("Tomt på hyllan.")
@@ -969,13 +1220,13 @@ with current_tab[3]:
                 mask = bag_items['Display'].isin(selected_bag)
                 indices_to_move = bag_items[mask].index
                 st.session_state.inventory.loc[indices_to_move, "Status"] = "Shelf"
-                save_to_sheet(st.session_state.inventory, "Inventory")
+                save_inventory_to_sb(st.session_state.inventory)
                 st.rerun()
             if st.button("🗑️ Skrota (Radera)", key="del_bag"):
                 mask = bag_items['Display'].isin(selected_bag)
                 indices_to_drop = bag_items[mask].index
                 st.session_state.inventory = st.session_state.inventory.drop(indices_to_drop)
-                save_to_sheet(st.session_state.inventory, "Inventory")
+                save_inventory_to_sb(st.session_state.inventory)
                 st.rerun()
         else:
             st.caption("Bagen är tom.")
@@ -1004,6 +1255,7 @@ with current_tab[3]:
         use_container_width=True, 
         hide_index=True,
         column_config={
+            "_disc_id": None,
             "Speed": st.column_config.NumberColumn(format="%.1f"),
             "Glide": st.column_config.NumberColumn(format="%.1f"),
             "Turn": st.column_config.NumberColumn(format="%.1f"),
@@ -1013,7 +1265,7 @@ with current_tab[3]:
     if st.button("💾 Spara Ändringar"):
         st.session_state.inventory = st.session_state.inventory[st.session_state.inventory["Owner"] != target_p]
         st.session_state.inventory = pd.concat([st.session_state.inventory, edited_df], ignore_index=True)
-        save_to_sheet(st.session_state.inventory, "Inventory")
+        save_inventory_to_sb(st.session_state.inventory)
         st.success("Sparat!")
     
     # --- DEBUG SECTION (REMOVE AFTER TESTING) ---
@@ -1073,7 +1325,7 @@ with current_tab[3]:
                     "Stabilitet": stab_txt, "Status": "Shelf"
                 }
                 st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame([nw])], ignore_index=True)
-                save_to_sheet(st.session_state.inventory, "Inventory")
+                save_inventory_to_sb(st.session_state.inventory)
                 st.success(f"{mn} sparad för {target_p}!"); st.session_state.ai_disc_data = None; st.rerun()
 
 # TAB 5: TELEMETRY
@@ -1105,6 +1357,7 @@ with current_tab[4]:
             ax.grid(color='gray', linestyle=':', alpha=0.3)
             if selected_sim_discs: ax.legend(facecolor='#1a1a1a', labelcolor='white')
             st.pyplot(fig)
+            plt.close(fig)
     with st2:
         if not df.empty:
             c1, c2 = st.columns(2)
@@ -1201,41 +1454,36 @@ if st.session_state.user_role == "Admin":
                 nu_role = st.selectbox("Roll", ["Player", "Admin"])
                 nu_mun = st.text_input("Hemkommun (t.ex. Kungsbacka)")
                 if st.form_submit_button("Skapa Användare & Scanna"):
-                    client = get_gsheet_client()
-                    ws = client.open("DiscCaddy_DB").worksheet("Users")
-                    ws.append_row([nu_name, nu_pin, nu_role, "True", nu_mun])
+                    _new_hash = bcrypt.hashpw(str(nu_pin).encode(), bcrypt.gensalt()).decode()
+                    _sb_insert("users", [{"username": nu_name, "pin_hash": _new_hash, "role": nu_role, "active": True, "municipality": nu_mun or None}])
                     start_kit = [{"Owner": nu_name, "Modell": "Start Putter", "Tillverkare": "Innova", "Plast": "DX", "Typ": "Putter", "Speed": 3, "Glide": 3, "Turn": 0, "Fade": 0, "Stabilitet": "Stabil", "Status": "Bag"}]
                     st.session_state.inventory = pd.concat([st.session_state.inventory, pd.DataFrame(start_kit)], ignore_index=True)
-                    save_to_sheet(st.session_state.inventory, "Inventory")
+                    save_inventory_to_sb(st.session_state.inventory)
                     if nu_mun:
                         lat, lon = get_lat_lon_from_query(nu_mun)
                         if lat:
                             new_courses = find_courses_via_osm_api(lat, lon)
                             for nc in new_courses:
                                 std_holes = {str(x): {"l": 100, "p": 3, "shape": "Rak"} for x in range(1, 19)}
-                                add_course_to_sheet(nc["name"], nc["lat"], nc["lon"], std_holes)
+                                add_course_to_sb(nc["name"], nc["lat"], nc["lon"], std_holes)
                             st.success(f"Användare {nu_name} skapad! Hittade {len(new_courses)} banor i {nu_mun}.")
                         else: st.warning("Användare skapad, men kunde inte hitta kommunen för bankartläggning.")
-                    st.cache_resource.clear(); st.rerun()
+                    st.cache_data.clear(); st.rerun()
         with c_u2:
             del_user = st.selectbox("Ta bort användare", users["Username"].tolist())
             if st.button("🗑️ Radera Användare"):
-                client = get_gsheet_client()
-                ws = client.open("DiscCaddy_DB").worksheet("Users")
-                try:
-                    cell = ws.find(del_user)
-                    ws.delete_rows(cell.row)
+                if _sb_delete("users", {"username": del_user}):
                     st.success("Raderad!")
-                    st.cache_resource.clear(); st.rerun()
-                except: st.error("Kunde inte hitta användaren.")
+                    st.cache_data.clear(); st.rerun()
+                else: st.error("Kunde inte radera användaren.")
         
         st.divider()
         st.subheader("🛠️ Bankarta & Databas")
         st.warning("Används endast om bankartorna ser felaktiga ut eller saknas.")
         if st.button("⚠️ Återställ & Uppdatera alla Bankartor", type="primary"):
-            if hard_reset_courses():
+            if hard_reset_courses_sb():
                 st.success("Bankartor återställda till Grand Tour Edition!")
-                st.cache_resource.clear()
+                st.cache_data.clear()
                 time.sleep(1)
                 st.rerun()
         
@@ -1255,6 +1503,6 @@ if st.session_state.user_role == "Admin":
                             nd.append({"Datum": raw_date, "Bana": r.get('CourseName', 'Unknown'), "Spelare": mn, "Hål": str(hi), "Resultat": int(h_score), "Par": 3, "Disc_Used": "Unknown"})
                 if nd:
                     new_hist = pd.concat([st.session_state.history, pd.DataFrame(nd)], ignore_index=True)
-                    st.session_state.history = new_hist; save_to_sheet(new_hist, "History")
+                    st.session_state.history = new_hist; append_history_to_sb(nd)
                     st.success(f"Importerade {len(nd)} rader!")
             except Exception as e: st.error(f"Fel: {e}")

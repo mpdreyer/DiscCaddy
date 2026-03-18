@@ -1,0 +1,17 @@
+# Streamlit secrets — NEVER commit these
+# Production secrets are managed via the Streamlit Cloud dashboard.
+# Local secrets go here and are gitignored.
+.streamlit/secrets.toml
+
+# Node / Playwright
+node_modules/
+package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# macOS
+.DS_Store

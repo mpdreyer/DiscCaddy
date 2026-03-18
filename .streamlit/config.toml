@@ -1,0 +1,39 @@
+# DiscCaddy — Local Development Config
+# This file is committed. It controls LOCAL behaviour only.
+#
+# AUTH STRATEGY
+# ─────────────
+# Production (Streamlit Community Cloud):
+#   Auth is enforced at the platform level (Dreyer Council workspace settings).
+#   The cloud platform intercepts requests before the app loads — config.toml
+#   has no effect on production auth.
+#
+# Local (streamlit run disc_app.py):
+#   Streamlit's React frontend sends a `gather_usage_stats` flag (set from
+#   browser.gatherUsageStats below) in the NewSession WebSocket message.
+#   When true, the frontend contacts Streamlit Cloud to validate org membership
+#   and renders the workspace auth gate ("Lösenord").
+#   Setting it to false suppresses that cloud check — auth gate is bypassed.
+#
+# secrets.toml (NOT committed — see .gitignore):
+#   Production secrets are managed via the Streamlit Cloud dashboard.
+#   Local secrets live in .streamlit/secrets.toml (gitignored).
+#   Do NOT add [auth] or [passwords] sections to the local secrets.toml.
+
+[server]
+# Prevent Streamlit from auto-opening a browser tab on each run.
+headless = true
+
+# Do not watch for file changes in production; fine to leave on locally.
+runOnSave = false
+
+[browser]
+# KEY SETTING: disables the Streamlit Cloud org-membership check.
+# When false, the NewSession message sends gather_usage_stats=false to the
+# React frontend, which skips the workspace auth gate (Dreyer Council).
+# This also stops usage telemetry being sent to data.streamlit.io.
+gatherUsageStats = false
+
+[client]
+# Show the toolbar (Deploy button etc.) only in developer mode.
+toolbarMode = "developer"

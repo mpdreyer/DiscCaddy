@@ -1,0 +1,24 @@
+{
+  "name": "disccaddy",
+  "version": "1.0.0",
+  "description": "",
+  "main": "test_app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mpdreyer/DiscCaddy.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/mpdreyer/DiscCaddy/issues"
+  },
+  "homepage": "https://github.com/mpdreyer/DiscCaddy#readme",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}
